@@ -27,15 +27,24 @@ class HabitController extends Controller
     {
         $validated = $request->validate([
             'title' => 'required|string|max:255',
-            'description' => 'nullable|string', // ← ここが問題の箇所だった
+            'description' => 'nullable|string',
             'frequency_type' => 'required|string',
             'start_date' => 'required|date',
             'end_date' => 'nullable|date|after_or_equal:start_date',
+            'days_of_week' => 'nullable|array', // ← 追加
+            'days_of_week.*' => 'in:0,1,2,3,4,5,6', // ← 曜日制限
         ]);
 
-        $validated['user_id'] = Auth::id(); // ログインユーザーに紐づけ
+        $validated['user_id'] = Auth::id();
 
-        Habit::create($validated); // habitsテーブルに新規作成
+        // カスタム頻度なら曜日配列をJSONで保存、それ以外ならnull
+        if ($validated['frequency_type'] === 'custom') {
+            $validated['days_of_week'] = json_encode($request->input('days_of_week', []));
+        } else {
+            $validated['days_of_week'] = null;
+        }
+
+        Habit::create($validated);
 
         return redirect()->route('habits.index')->with('success', '習慣を登録しました。');
     }
@@ -70,10 +79,18 @@ class HabitController extends Controller
         $validated = $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'frequency_type' => 'required|string',
+            'frequency_type' => 'required|in:daily,weekly,custom',
             'start_date' => 'required|date',
             'end_date' => 'nullable|date|after_or_equal:start_date',
+            'days_of_week' => 'nullable|array', // ← 追加
+            'days_of_week.*' => 'in:0,1,2,3,4,5,6', // ← 曜日制限
         ]);
+
+        if ($validated['frequency_type'] === 'custom') {
+            $validated['days_of_week'] = json_encode($request->input('days_of_week', []));
+        } else {
+            $validated['days_of_week'] = null;
+        }
 
         $habit->update($validated);
 
