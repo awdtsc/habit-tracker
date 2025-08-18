@@ -1,28 +1,30 @@
 <?php
 
-use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\{ProfileController, DashboardController, HabitController, HabitLogController, StatsController};
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\HabitController;
-use App\Http\Controllers\HabitLogController;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+Route::get('/', fn () => view('welcome'));
 
 Route::get('/dashboard', [DashboardController::class, 'index'])
-    ->middleware(['auth', 'verified'])
-    ->name('dashboard');
+    ->middleware(['auth','verified'])->name('dashboard');
 
 Route::middleware('auth')->group(function () {
-    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
-    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
-    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
-    Route::post('/habit-logs', [HabitLogController::class, 'store'])->name('habit-logs.store');
-    Route::delete('/habits/{habit}', [HabitController::class, 'destroy'])->name('habits.destroy');
-    Route::get('/habits/{habit}/edit', [HabitController::class, 'edit'])->name('habits.edit');
-    Route::put('/habits/{habit}', [HabitController::class, 'update'])->name('habits.update');
+    // プロフィール
+    Route::get('/profile', [ProfileController::class,'edit'])->name('profile.edit');
+    Route::patch('/profile', [ProfileController::class,'update'])->name('profile.update');
+    Route::delete('/profile', [ProfileController::class,'destroy'])->name('profile.destroy');
+
+    // 習慣 CRUD（従来のweb）
     Route::resource('habits', HabitController::class);
+
+    // === Vue が叩く API は /api/* に統一 ===
+    Route::prefix('api')->as('api.')->group(function () {
+        Route::get('/weekly-board', [StatsController::class, 'weeklyBoard'])->name('weekly-board');
+        Route::post('/habit-logs/toggle', [HabitLogController::class, 'toggle'])->name('habit-logs.toggle');
+
+        // 使っていなければ下行は丸ごと削除してOK
+        Route::get('/achievement/weekly', [StatsController::class, 'weeklyByDay'])->name('achievement.weekly');
+    });
 });
 
 require __DIR__.'/auth.php';

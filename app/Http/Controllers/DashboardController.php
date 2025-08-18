@@ -11,25 +11,55 @@ use App\Models\HabitLog;
 
 class DashboardController extends Controller
 {
-    public function index()
+    public function index(Request $req)
     {
-        $userId = Auth::id(); 
+        $userId = Auth::id();
+        $start  = $req->filled('start')
+            ? Carbon::parse($req->query('start'))->startOfWeek(Carbon::MONDAY)
+            : Carbon::now()->startOfWeek(Carbon::MONDAY);
+        $end    = $start->copy()->addDays(6);
 
-        // 今週（日曜〜土曜）
-        $startOfWeek = Carbon::now()->startOfWeek(Carbon::SUNDAY);
-        $dates = collect();
-        for ($i = 0; $i < 7; $i++) {
-            $dates->push($startOfWeek->copy()->addDays($i));
+        // 表示する7日
+        $days = collect(range(0,6))->map(fn($i) => $start->copy()->addDays($i));
+
+        $habits = Habit::where('user_id', $userId)
+            ->orderBy('id')->get(['id','title','days_of_week','start_date','end_date']);
+
+        // 当週ログ → 最新状態を map に
+        $logs = HabitLog::where('user_id',$userId)
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->orderBy('id','desc')->get()
+            ->groupBy(fn($r)=>$r->date.'#'.$r->habit_id);
+
+        $checkedMap = [];
+        foreach ($days as $d) {
+            foreach ($habits as $h) {
+                $key = $d->toDateString().'#'.$h->id;
+                $checkedMap[$key] = ($logs->get($key)?->first()?->status) === 'checked';
+            }
         }
 
-        // 習慣を取得（ユーザーごと）
-        $habits = Habit::where('user_id', $userId)->get();
+        return view('dashboard', [
+            'week' => [
+                'start' => $start, 'end' => $end,
+                'prev' => $start->copy()->subWeek()->toDateString(),
+                'next' => $start->copy()->addWeek()->toDateString(),
+            ],
+            'days' => $days,
+            'habits' => $habits,
+            'checkedMap' => $checkedMap,
+        ]);
+    }
 
-        // 今週のログをまとめて取得
-        $logs = HabitLog::where('user_id', $userId)
-            ->whereBetween('date', [$dates->first()->toDateString(), $dates->last()->toDateString()])
-            ->get()
-            ->groupBy(fn($log) => $log->habit_id . '_' . $log->date);
-        return view('dashboard', compact('dates', 'habits', 'logs'));
+    private function getWeekDates(int $weekOffset): array
+    {
+        $startOfWeek = Carbon::now()->startOfWeek()->addWeeks($weekOffset);
+        $dates = [];
+
+        for ($i = 0; $i < 7; $i++) {
+            $dates[] = $startOfWeek->copy()->addDays($i);
+        }
+
+        return $dates;
     }
 }

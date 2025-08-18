@@ -38,47 +38,6 @@
                         </div>
                     </div>
                 @endforeach
-
-                <script>
-                document.addEventListener('DOMContentLoaded', function () {
-                    document.querySelectorAll('.habit-checkbox').forEach(checkbox => {
-                        checkbox.addEventListener('change', function () {
-                            const habitId = this.dataset.habitId;
-                            const status = this.checked ? 1 : 0;
-                            const wrapper = this.closest('div'); // 外側の habit card
-                            const message = wrapper.querySelector('.save-message');
-
-                            fetch("{{ route('habit-logs.store') }}", {
-                                method: "POST",
-                                headers: {
-                                    "Content-Type": "application/json",
-                                    "X-CSRF-TOKEN": "{{ csrf_token() }}"
-                                },
-                                body: JSON.stringify({
-                                    habit_id: habitId,
-                                    status: status,
-                                    note: ""
-                                })
-                            }).then(res => {
-                                if (!res.ok) throw new Error("保存に失敗しました");
-
-                                // ✔️ メッセージ表示
-                                message.classList.remove('hidden');
-                                message.textContent = "✔️ 保存しました";
-
-                                // 5秒後に非表示
-                                setTimeout(() => {
-                                    message.classList.add('hidden');
-                                }, 5000);
-
-                            }).catch(err => {
-                                alert(err.message);
-                                this.checked = !this.checked;
-                            });
-                        });
-                    });
-                });
-                </script>
             </div>
         @endif
 
