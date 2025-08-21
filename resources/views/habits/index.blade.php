@@ -1,52 +1,29 @@
-{{-- resources/views/habits/index.blade.php --}}
 <x-app-layout>
-    <x-slot name="header">
-        <h2 class="text-xl font-semibold text-gray-800">習慣一覧</h2>
-    </x-slot>
+  <x-slot name="header">
+    <h2 class="text-xl font-semibold text-slate-800">習慣一覧</h2>
+  </x-slot>
 
-    <div class="max-w-4xl mx-auto p-4">
-        {{-- フラッシュメッセージ --}}
-        @if (session('success'))
-            <div class="mb-4 text-green-600">
-                {{ session('success') }}
-            </div>
-        @endif
+  <main class="mx-auto max-w-[960px] px-4 sm:px-6 py-6 space-y-8">
+    {{-- ダッシュボード（今日タブなどのVueが載る） --}}
+    <div id="habit-dashboard-root" class="space-y-6"></div>
 
-        {{-- 習慣が存在しない場合 --}}
-        @if ($habits->isEmpty())
-            <p class="text-gray-600">まだ習慣が登録されていません。</p>
-        @else
-            <div class="space-y-4">
-                @foreach ($habits as $habit)
-                    <div class="mb-4 p-4 bg-white rounded-lg shadow">
-                        <h4 class="font-bold text-xl mb-2">{{ $habit->title }}</h4>
-                        <p class="mb-1">{{ $habit->description }}</p>
-                        <p class="text-sm text-gray-600">頻度: {{ $habit->frequency_type }}</p>
-                        <p class="text-sm text-gray-600">開始日: {{ $habit->start_date }}</p>
-                        <p class="text-sm text-gray-600">終了日: {{ $habit->end_date }}</p>
+    {{-- 一覧カード（Vueで置き換え）。必要URLを data-* で渡す --}}
+    <div
+      id="habits-index-root"
+      data-habits-base="{{ url('/habits') }}"
+      data-create-url="{{ route('habits.create') }}"
+    ></div>
 
-                        <div class="mt-2 flex space-x-2">
-                            {{-- 編集ボタン --}}
-                            <a href="{{ route('habits.edit', $habit->id) }}" class="text-blue-500">編集</a>
+    {{-- JS 無効時のフォールバックCTA（Vueが描画したら隠れる想定） --}}
+    <noscript>
+      <div class="text-right">
+        <a href="{{ route('habits.create') }}"
+           class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-white shadow-md">
+          <span class="text-lg">＋</span> 新しく習慣を追加
+        </a>
+      </div>
+    </noscript>
+  </main>
 
-                            {{-- 削除ボタン --}}
-                            <form method="POST" action="{{ route('habits.destroy', $habit->id) }}">
-                                @csrf
-                                @method('DELETE')
-                                <button type="submit" class="text-red-500" onclick="return confirm('本当に削除しますか？')">削除</button>
-                            </form>
-                        </div>
-                    </div>
-                @endforeach
-            </div>
-        @endif
-
-        {{-- 新しい習慣を追加するボタン --}}
-
-        <div class="mt-6 text-right">
-            <a href="{{ route('habits.create') }}" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
-                ＋ 新しく習慣を追加
-            </a>
-        </div>
-    </div>
+  @vite(['resources/css/app.css','resources/js/habits-dashboard.js','resources/js/habits-index.js'])
 </x-app-layout>

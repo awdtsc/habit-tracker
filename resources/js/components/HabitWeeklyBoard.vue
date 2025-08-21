@@ -1,110 +1,101 @@
+<!-- resources/js/components/HabitWeeklyBoard.vue -->
 <script setup>
-import axios from 'axios'
-import ChartWeekly from './ChartWeekly.vue'
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, onMounted } from 'vue'
+import { useHabitBoard } from '@/stores/useHabitBoard'
+import ChartWeekly from '@/components/ChartWeekly.vue'
 
-function startOfWeek(date = new Date()) {
-  const base = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  const w = base.getDay() || 7
-  if (w !== 1) base.setDate(base.getDate() - (w - 1))
-  return base
-}
-function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate() + n); return d }
-function isoLocal(d) { const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}` }
-function mmdd(d) { return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}` }
+const { state, fetchBoard, toggle, isFresh } = useHabitBoard()
 
-const todayISO = isoLocal(new Date())
+// 週の開始日は store(state.start) を使用
+onMounted(() => {
+  if (!isFresh(60_000) || !state.habits.length) fetchBoard({ silent: !!state.habits.length })
+})
+
+/* 日付ユーティリティ（表示用） */
+function addDays(date, n){ const d = new Date(date); d.setDate(d.getDate()+n); return d }
+function iso(d){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}` }
+function mmdd(d){ return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}` }
+
 const DOW_EN = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
-
-const start  = ref(startOfWeek())
-const days   = computed(() => Array.from({ length: 7 }, (_, i) => {
-  const dt = addDays(start.value, i)
-  return { iso: isoLocal(dt), mmdd: mmdd(dt), dowEn: DOW_EN[i] }
-}))
-const rangeLabel = computed(() => `${mmdd(start.value)} 〜 ${mmdd(addDays(start.value, 6))}`)
-
-const habits = ref([])
-const checks = ref({})            // { 'habitId|yyyy-mm-dd': true/false }
-const rates  = ref(new Array(7).fill(0))
-const saving = ref(false)
-
-const API_GET = '/api/weekly-board'
-const API_TOGGLE = '/api/habit-logs/toggle'
+const days = computed(() =>
+  Array.from({length:7},(_,i)=> {
+    const dt = addDays(state.start, i)
+    return { iso: iso(dt), mmdd: mmdd(dt), dowEn: DOW_EN[i] }
+  })
+)
 
 const key = (hid, dateISO) => `${hid}|${dateISO}`
-const isChecked = (hid, dateISO) => !!checks.value[key(hid, dateISO)]
-const shiftWeek = n => (start.value = addDays(start.value, n * 7))
+const isChecked = (hid, dateISO) => !!state.checks[key(hid, dateISO)]
+const todayISO = iso(new Date())
 
-// 開始日前・終了日後・未来日は押せない（見た目はデフォでグレー）
-const isDisabled = (habit, dateISO) => {
-  if (saving.value) return true
+/* その日が対象か（storeのロジックと整合させる） */
+function isScheduledFor(h, dateISO){
+  if (h?.start_date && dateISO < h.start_date) return false
+  if (h?.end_date   && dateISO > h.end_date)   return false
+  const dt = new Date(dateISO)
+  const dow = ((dt.getDay()+6)%7)+1
+  switch (h?.frequency_type){
+    case 'daily': return true
+    case 'weekdays': return dow>=1 && dow<=5
+    case 'weekends': return dow===6 || dow===7
+    case 'custom': return Array.isArray(h?.days_of_week) && h.days_of_week.map(Number).includes(dow)
+    case 'quota': return true
+    default: return true
+  }
+}
+const isDisabled = (h, dateISO) => {
   if (dateISO > todayISO) return true
-  if (habit?.start_date && dateISO < habit.start_date) return true
-  if (habit?.end_date   && dateISO > habit.end_date)   return true
+  if (!isScheduledFor(h, dateISO)) return true
   return false
 }
 
-async function fetchBoard() {
-  const s = isoLocal(start.value)
-  const { data } = await axios.get(API_GET, { params: { start: s } })
-
-  habits.value = data.habits ?? []
-  const map = {}
-  ;(data.checks ?? []).forEach(r => { map[key(r.habit_id, r.date)] = !!r.value })
-  checks.value = map
-  rates.value = (data.rates?.length === 7) ? data.rates : new Array(7).fill(0)
+/* 週移動：state.start を動かしてから再取得 */
+function shiftWeek(n){
+  const d = new Date(state.start); d.setDate(d.getDate() + n*7)
+  state.start = d
+  fetchBoard({ silent: true })
 }
 
-async function onToggle(habitId, dateISO, val) {
-  try {
-    saving.value = true
-    // 楽観更新
-    checks.value = { ...checks.value, [key(habitId, dateISO)]: !!val }
-    await axios.post(API_TOGGLE, { habit_id: habitId, date: dateISO, value: !!val })
-    await fetchBoard()
-  } catch (e) {
-    const k = key(habitId, dateISO)
-    checks.value = { ...checks.value, [k]: !val }
-  } finally {
-    saving.value = false
-  }
-}
-
-onMounted(fetchBoard)
-watch(start, fetchBoard)
+/* 週表からのトグルも store 経由でOK（楽観更新→ratesも即反映） */
+const onToggle = (hid, dateISO, val) => toggle(hid, dateISO, val)
 </script>
 
 <template>
   <section class="mx-auto max-w-6xl p-6 space-y-6">
     <div class="flex items-center justify-between">
       <button class="text-blue-600 hover:underline" @click="shiftWeek(-1)">← 前の週</button>
-      <div class="text-2xl font-semibold select-none tracking-wide">{{ rangeLabel }}</div>
+      <div class="text-2xl font-semibold select-none tracking-wide">
+        {{ mmdd(state.start) }} 〜 {{ mmdd(new Date(state.start.getFullYear(), state.start.getMonth(), state.start.getDate()+6)) }}
+      </div>
       <button class="text-blue-600 hover:underline" @click="shiftWeek(1)">次の週 →</button>
     </div>
 
     <div class="rounded-2xl bg-white shadow ring-1 ring-gray-200 overflow-x-auto">
-      <table class="w-full table-fixed">
+      <table class="table-fixed w-full" style="--habit-col: 8.5rem;">
         <colgroup>
-          <col class="w-44" />
-          <col v-for="i in 7" :key="i" class="w-28" />
+          <col style="width: var(--habit-col)" />
+          <col v-for="i in 7" :key="i" :style="{ width: 'calc((100% - var(--habit-col)) / 7)'}" />
         </colgroup>
 
         <thead class="bg-gray-50 border-b">
-          <tr>
-            <th class="px-5 py-4 text-left text-sm font-semibold text-gray-700">習慣</th>
-            <th v-for="d in days" :key="d.iso" class="px-5 py-3 text-center text-sm font-semibold text-gray-700">
-              <div class="text-[15px]">{{ d.mmdd }}</div>
-              <div class="text-xs text-gray-500">{{ d.dowEn }}</div>
+          <tr class="align-middle">
+            <th class="p-0 text-left"><div class="px-4 py-4 text-sm font-semibold text-gray-700">習慣</div></th>
+            <th v-for="d in days" :key="d.iso" class="p-0">
+              <div class="h-12 w-full pl-4 pr-[14px] flex flex-col items-end justify-center">
+                <div class="text-[15px] leading-tight tabular-nums">{{ d.mmdd }}</div>
+                <div class="text-xs text-gray-500 leading-tight">{{ d.dowEn }}</div>
+              </div>
             </th>
           </tr>
         </thead>
 
         <tbody class="divide-y divide-gray-100">
-          <tr v-for="h in habits" :key="h.id">
-            <td class="px-5 py-4 text-sm font-medium text-gray-900">{{ h.title }}</td>
-
+          <tr v-for="h in state.habits" :key="h.id" class="align-middle">
+            <td class="p-0"><div class="px-4 py-4 text-sm font-medium text-gray-900">{{ h.title }}</div></td>
             <td v-for="d in days" :key="d.iso" class="p-0">
-              <div class="px-3 py-2 flex h-12 w-full items-center justify-center">
+              <div class="h-12 w-full pl-4 pr-[14px] flex items-center justify-center"
+                   :class="isDisabled(h, d.iso) ? 'opacity-40 pointer-events-none' : ''"
+                   :title="isDisabled(h, d.iso) ? 'この日は対象外です' : ''">
                 <input
                   type="checkbox"
                   style="appearance:auto;-webkit-appearance:checkbox;-moz-appearance:checkbox"
@@ -117,17 +108,15 @@ watch(start, fetchBoard)
             </td>
           </tr>
 
-          <tr v-if="habits.length === 0">
-            <td colspan="8" class="px-5 py-10 text-center text-gray-500">
-              📌 まだ習慣がありません。右上の「＋ 新しい習慣を追加」から始めてみましょう。
-            </td>
+          <tr v-if="state.habits.length === 0">
+            <td colspan="8" class="px-5 py-10 text-center text-gray-500">📌 まだ習慣がありません。</td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <div class="mx-auto w-full">
-      <ChartWeekly :labels="days.map(d => d.mmdd)" :values="rates" />
+      <ChartWeekly :labels="days.map(d => d.mmdd)" :values="state.rates" />
     </div>
   </section>
 </template>

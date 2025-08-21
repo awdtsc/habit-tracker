@@ -76,18 +76,30 @@ class StatsController extends Controller
         $userId = Auth::id();
         [$start,$end] = $this->weekRange($req);
 
-        // ✅ 開始/終了日も返す（フロントで disabled 判定に使う）
+        // ここを拡張：一覧で必要なフィールドもまとめて返す
         $habits = Habit::where('user_id',$userId)
-            ->get(['id','title','start_date','end_date'])
-            ->map(fn($h)=>[
-                'id'         => (int)$h->id,
-                'title'      => $h->title,
-                'start_date' => optional($h->start_date)->toDateString(),
-                'end_date'   => optional($h->end_date)->toDateString(),
+            ->get([
+                'id','title','description',
+                'frequency_type','days_of_week',
+                'start_date','end_date',
+                'time_slot','category','color_tag',
             ])
-            ->values();
+            ->map(function($h){
+                return [
+                    'id'            => (int)$h->id,
+                    'title'         => $h->title,
+                    'description'   => $h->description,
+                    'frequency_type'=> $h->frequency_type,
+                    'days_of_week'  => is_array($h->days_of_week) ? $h->days_of_week : (array)$h->days_of_week,
+                    'start_date'    => optional($h->start_date)->toDateString(),
+                    'end_date'      => optional($h->end_date)->toDateString(),
+                    'time_slot'     => $h->time_slot,
+                    'category'      => $h->category,
+                    'color_tag'     => $h->color_tag,
+                ];
+            })->values();
 
-        // checks：今週分の最新だけ
+        // 今週のチェック最新のみ（既存）
         $sub = DB::table('habit_logs')
             ->selectRaw('MAX(id) AS id')
             ->where('user_id',$userId)
@@ -102,17 +114,16 @@ class StatsController extends Controller
 
         $checks = $logs->map(fn($l) => [
             'habit_id' => (int)$l->habit_id,
-            'date'     => Carbon::parse($l->date)->toDateString(),
+            'date'     => \Carbon\Carbon::parse($l->date)->toDateString(),
             'value'    => (bool)$l->status,
         ])->values();
 
-        // rates は weeklyByDay と同じロジックを再利用
         $rates = $this->weeklyByDay($req)->getData(true)['rates'];
 
         return response()->json([
-            'habits'=>$habits,
-            'checks'=>$checks,
-            'rates' =>$rates,
+            'habits' => $habits,
+            'checks' => $checks,
+            'rates'  => $rates,
         ]);
     }
 }

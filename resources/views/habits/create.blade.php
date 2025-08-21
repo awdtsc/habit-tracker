@@ -1,87 +1,168 @@
+{{-- resources/views/habits/create.blade.php --}}
 <x-app-layout>
     <x-slot name="header">
-        <h2 class="text-xl font-semibold leading-tight text-gray-800">
-            習慣を追加
+        <h2 class="font-semibold text-xl text-gray-800 leading-tight">
+            新しい習慣を追加
         </h2>
     </x-slot>
 
-    <div class="max-w-2xl mx-auto p-4">
-        {{-- エラーメッセージ表示 --}}
-        @if ($errors->any())
-            <div class="mb-4 text-red-600">
-                <ul>
-                    @foreach ($errors->all() as $error)
-                        <li>• {{ $error }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        @endif
+    <div class="min-h-screen bg-gray-100 py-12 px-4">
+        <div class="max-w-xl mx-auto bg-white rounded shadow py-6 px-8">
+            {{-- バリデーションエラー --}}
+            @if ($errors->any())
+                <div class="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">
+                    <ul class="list-disc pl-5">
+                        @foreach ($errors->all() as $e)
+                            <li>{{ $e }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+            @endif
 
-        {{-- 登録フォーム --}}
-        <form method="POST" action="{{ route('habits.store') }}">
-            @csrf
+            @php
+                $ft   = old('frequency_type', 'daily');
+                $dows = old('days_of_week', []);
+                $dowJp = [1=>'月',2=>'火',3=>'水',4=>'木',5=>'金',6=>'土',7=>'日'];
+                $weeklyQuota = old('weekly_quota', 3);
+                $noEnd = old('no_end', true);  // 作成時は「終了日なし」をデフォルトON
+            @endphp
 
-            <div class="mb-4">
-                <label class="block mb-1 font-semibold" for="title">タイトル</label>
-                <input type="text" name="title" id="title" class="w-full border p-2" required>
-            </div>
+            <form method="POST" action="{{ route('habits.store') }}">
+                @csrf
 
-            <div class="mb-4">
-                <label class="block mb-1 font-semibold" for="description">説明</label>
-                <textarea name="description" id="description" class="w-full border p-2"></textarea>
-            </div>
-
-            <div class="mb-4">
-                <label class="block mb-1 font-semibold" for="frequency_type">頻度</label>
-
-                <select name="frequency_type" id="frequency_type" class="w-full border p-2">
-                    <option value="daily">毎日</option>
-                    <option value="weekly">毎週</option>
-                    <option value="custom">カスタム</option>
-                </select>
-
-                {{-- weekly用：週に何回 --}}
-                <div class="mt-2" id="weekly_count_section" style="display: none;">
-                    <label class="block mb-1 font-semibold" for="weekly_count">週に何回実施？</label>
-                    <input type="number" name="weekly_count" id="weekly_count" min="1" max="7" class="w-full border p-2" placeholder="例：3">
+                {{-- タイトル --}}
+                <div class="mb-4">
+                    <label class="block font-bold mb-1">タイトル</label>
+                    <input type="text" name="title" value="{{ old('title') }}" required
+                           class="w-full border rounded p-2">
                 </div>
 
-                {{-- custom用：曜日選択 --}}
-                <div class="mt-2" id="days_of_week_section" style="display: none;">
-                    <label class="block mb-1 font-semibold">曜日を選択</label>
-                    <div class="flex flex-wrap gap-2">
-                        <label><input type="checkbox" name="days_of_week[]" value="0"> 日</label>
-                        <label><input type="checkbox" name="days_of_week[]" value="1"> 月</label>
-                        <label><input type="checkbox" name="days_of_week[]" value="2"> 火</label>
-                        <label><input type="checkbox" name="days_of_week[]" value="3"> 水</label>
-                        <label><input type="checkbox" name="days_of_week[]" value="4"> 木</label>
-                        <label><input type="checkbox" name="days_of_week[]" value="5"> 金</label>
-                        <label><input type="checkbox" name="days_of_week[]" value="6"> 土</label>
+                {{-- 説明 --}}
+                <div class="mb-4">
+                    <label class="block font-bold mb-1">説明</label>
+                    <textarea name="description" rows="3" class="w-full border rounded p-2">{{ old('description') }}</textarea>
+                </div>
+
+                {{-- 頻度 --}}
+                <div class="mb-4">
+                    <label class="block font-bold mb-2">頻度</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        @foreach ([
+                            'daily'    => '毎日',
+                            'weekdays' => '平日',
+                            'weekends' => '週末',
+                            'custom'   => 'カスタム（曜日指定）',
+                            'quota'    => '週の回数（自由）',
+                        ] as $val => $label)
+                            <label class="inline-flex items-center gap-2">
+                                <input type="radio" name="frequency_type" value="{{ $val }}" {{ $ft === $val ? 'checked' : '' }}>
+                                <span>{{ $label }}</span>
+                            </label>
+                        @endforeach
+                    </div>
+
+                    {{-- カスタム曜日（1=Mon … 7=Sun） --}}
+                    <div id="dowBox" class="mt-3 {{ $ft==='custom' ? '' : 'opacity-50 pointer-events-none' }}">
+                        <div class="flex flex-wrap gap-3">
+                            @foreach ($dowJp as $num => $jp)
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="checkbox" name="days_of_week[]" value="{{ $num }}"
+                                           {{ in_array((int)$num, array_map('intval',$dows), true) ? 'checked' : '' }}>
+                                    <span>{{ $jp }}</span>
+                                </label>
+                            @endforeach
+                        </div>
+                        <p class="mt-1 text-xs text-gray-500">※ カスタム選択時は曜日を指定</p>
+                    </div>
+
+                    {{-- 週クオータ（週の回数） --}}
+                    <div id="quotaBox" class="mt-3 {{ $ft==='quota' ? '' : 'opacity-50 pointer-events-none' }}">
+                        <label class="block font-bold mb-1">週の目標回数</label>
+                        <input type="number" name="weekly_quota" min="1" max="7" step="1"
+                               value="{{ $weeklyQuota }}"
+                               class="w-28 border rounded p-2">
+                        <p class="mt-1 text-xs text-gray-500">例: 3 → 「今週3回できれば達成」。曜日は自由</p>
                     </div>
                 </div>
-            </div>
 
-            {{-- 開始日と終了日の入力 --}}
-            <div class="mb-4">
-                <label class="block mb-1 font-semibold" for="start_date">開始日</label>
-                <input type="date" name="start_date" id="start_date" class="w-full border p-2">
-            </div>
+                {{-- 期間 --}}
+                <div class="mb-4 grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <label class="block font-bold mb-1">開始日</label>
+                        <input type="date" name="start_date" value="{{ old('start_date') }}"
+                               class="w-full border rounded p-2">
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-1">終了日</label>
+                        <div class="flex items-center gap-3">
+                            <input type="date" id="end_date" name="end_date" value="{{ old('end_date') }}"
+                                   class="border rounded p-2">
+                            <label class="inline-flex items-center gap-2 text-sm">
+                                <input type="checkbox" id="no_end" name="no_end" value="1" {{ $noEnd ? 'checked' : '' }}>
+                                <span>終了日なし（ずっと）</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
 
-            <div class="mb-4">
-                <label class="block mb-1 font-semibold" for="end_date">終了日</label>
-                <input type="date" name="end_date" id="end_date" class="w-full border p-2">
-            </div>
+                {{-- 任意メタ --}}
+                <div class="mb-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                        <label class="block font-bold mb-1">時間帯（任意）</label>
+                        @php $slot = old('time_slot', 'anytime'); @endphp
+                        <select name="time_slot" class="w-full border rounded p-2">
+                            @foreach (['anytime'=>'いつでも','morning'=>'朝','noon'=>'昼','evening'=>'夕','night'=>'夜'] as $v=>$l)
+                                <option value="{{ $v }}" {{ $slot===$v ? 'selected' : '' }}>{{ $l }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold mb-1">カテゴリ（任意）</label>
+                        <input type="text" name="category" value="{{ old('category') }}" class="w-full border rounded p-2">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block font-bold mb-1">カラー（任意 / 例: #22c55e）</label>
+                        <input type="text" name="color_tag" value="{{ old('color_tag') }}" class="w-full border rounded p-2">
+                    </div>
+                </div>
 
-            <div class="text-right">
-                <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded">登録</button>
-            </div>
-        </form>
-        <script>
-            document.getElementById('frequency_type').addEventListener('change', function () {
-                const freq = this.value;
-                document.getElementById('weekly_count_section').style.display = (freq === 'weekly') ? 'block' : 'none';
-                document.getElementById('days_of_week_section').style.display = (freq === 'custom') ? 'block' : 'none';
-            });
-        </script>
+                <div class="mt-6 flex justify-end gap-3">
+                    <a href="{{ route('habits.index') }}" class="px-4 py-2 rounded border">戻る</a>
+                    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">登録</button>
+                </div>
+            </form>
+
+            {{-- UI制御 --}}
+            <script>
+                (function () {
+                    const ftRadios = document.querySelectorAll('input[name="frequency_type"]');
+                    const dowBox   = document.getElementById('dowBox');
+                    const quotaBox = document.getElementById('quotaBox');
+                    const endDate  = document.getElementById('end_date');
+                    const noEnd    = document.getElementById('no_end');
+
+                    function toggle(el, on) {
+                        if (!el) return;
+                        el.classList.toggle('opacity-50', !on);
+                        el.classList.toggle('pointer-events-none', !on);
+                    }
+                    function refresh() {
+                        const v = [...ftRadios].find(r => r.checked)?.value;
+                        toggle(dowBox,   v === 'custom');
+                        toggle(quotaBox, v === 'quota');
+                    }
+                    function syncEnd() {
+                        if (!endDate || !noEnd) return;
+                        endDate.disabled = noEnd.checked;
+                        if (noEnd.checked) endDate.value = '';
+                    }
+                    ftRadios.forEach(r => r.addEventListener('change', refresh));
+                    noEnd && noEnd.addEventListener('change', syncEnd);
+
+                    refresh();
+                    syncEnd();
+                })();
+            </script>
+        </div>
     </div>
 </x-app-layout>
