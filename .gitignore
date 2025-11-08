@@ -22,3 +22,18 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Vite の一時キャッシュ
+/.vite/
+
+# その日のデバッグ出力や手元ダンプを置く場所
+/storage/debug/
+
+# Laravel が生成するキャッシュ類（*.php は生成物）
+/bootstrap/cache/*.php
+
+# テスト用 .env も除外（漏洩防止）
+.env.testing
+
+# ローカル専用の env バリアント
+.env.*.local

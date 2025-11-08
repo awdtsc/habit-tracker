@@ -3,6 +3,9 @@ import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from '@/App.vue'
 
+// axios 共通設定を import（resources/js/axios.js）
+import axios from '@/axios'
+
 // ルート定義（遅延読み込み）
 const routes = [
   {
@@ -25,4 +28,6 @@ const router = createRouter({
   scrollBehavior() { return { top: 0 } },
 })
 
-createApp(App).use(router).mount('#app')
+createApp(App)
+  .use(router)
+  .mount('#app')

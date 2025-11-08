@@ -2,20 +2,18 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
+use NotificationChannels\WebPush\HasPushSubscriptions;
 
 class User extends Authenticatable
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable, HasPushSubscriptions;
 
     /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
+     * 一括代入を許可するカラム
      */
     protected $fillable = [
         'name',
@@ -24,9 +22,7 @@ class User extends Authenticatable
     ];
 
     /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
+     * レスポンスに含めない属性
      */
     protected $hidden = [
         'password',
@@ -34,15 +30,21 @@ class User extends Authenticatable
     ];
 
     /**
-     * Get the attributes that should be cast.
+     * キャスト
      *
-     * @return array<string, string>
+     * ※ password の自動ハッシュは切っておく
+     *    -> tinkerで手動でbcryptしたいときに二重ハッシュにならないようにするため
      */
-    protected function casts(): array
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+        // 'password' => 'hashed',  ← 今回はあえて外す
+    ];
+
+    /**
+     * WebPush チャネルのルーティング
+     */
+    public function routeNotificationForWebPush()
     {
-        return [
-            'email_verified_at' => 'datetime',
-            'password' => 'hashed',
-        ];
+        return $this->pushSubscriptions;
     }
 }

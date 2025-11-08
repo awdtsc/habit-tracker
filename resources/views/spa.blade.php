@@ -4,8 +4,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Dashboard</title>
-  @vite(['resources/css/app.css', 'resources/js/spa.js'])
+  <title>Habit Tracker</title>
+
+  {{-- ViteでCSSとJSを読み込む --}}
+  @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="antialiased">
   <div id="app"></div>

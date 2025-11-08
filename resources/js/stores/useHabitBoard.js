@@ -1,28 +1,21 @@
 // resources/js/stores/useHabitBoard.js
 import { reactive } from 'vue'
-import axios from 'axios'
+import axios from '@/axios'                     // ← グローバル設定済みのaxiosを使う
+import { toSlotNum as _toSlotNum } from '@/domain/timeutil'
+export const toSlotNum = _toSlotNum
+import { startOfWeek, addDays, isoLocal } from '@/domain/dates'
+import { useAuthStore } from '@/stores/auth'    // ← 認証状態を見る
 
-/* ---- 日付ユーティリティ ---- */
-function startOfWeek(date = new Date()) {
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  const w = d.getDay() || 7
-  if (w !== 1) d.setDate(d.getDate() - (w - 1))
-  return d
-}
-function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate() + n); return d }
-function isoLocal(d) {
-  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0')
-  return `${y}-${m}-${day}`
+/* ========= ログキー生成 ========= */
+export function logKey (habitId, dateISO, slot = 0) {
+  return `${habitId}|${dateISO}|${toSlotNum(slot)}`
 }
 
-/* ---- ストア本体 ---- */
-const SNAP_KEY = '__board_snapshot__'
-const LOCAL_WIN_MS = 1500 // 再同期での巻き戻り防止：直近1.5sはローカル優先
-
+/* ========= ストア本体 ========= */
 const state = reactive({
   start: startOfWeek(new Date()),
   habits: [],
-  checks: {},                 // {'habitId|yyyy-mm-dd': true/false}
+  checks: {},          // { key: {habit_id, date, time_slot, status, rating, updated_at, done} }
   rates: new Array(7).fill(0),
   loading: false,
   saving: false,
@@ -31,187 +24,317 @@ const state = reactive({
 
 const todayISO = isoLocal(new Date())
 
-/* ---- 操作世代＆保留管理 ---- */
-const _opSeq = {}                                // {'k': seq}
+/* ========= 操作世代＆保留管理 ========= */
+const _opSeq = {}
 const nextOpId = k => (_opSeq[k] = (_opSeq[k] || 0) + 1)
 const isLatest = (k, id) => _opSeq[k] === id
 
-const _touchedAt = {}                             // {'k': ts} … 直近タッチ
-const markTouched = k => { _touchedAt[k] = Date.now() }
-
-const _pendingByKey = {}                          // {'k': count} … 送信保留中
+const _pendingByKey = {}
 const incPending = k => (_pendingByKey[k] = (_pendingByKey[k] || 0) + 1)
 const decPending = k => {
   if (_pendingByKey[k] > 0) _pendingByKey[k]--
   if (_pendingByKey[k] <= 0) delete _pendingByKey[k]
 }
 
-/* ---- 「全完了後に1回だけ再同期」 ---- */
-let _activeRequests = 0
-let _reconcileTimer
-function scheduleReconcileAfterAll() {
-  clearTimeout(_reconcileTimer)
-  if (_activeRequests > 0) return
-  _reconcileTimer = setTimeout(() => {
-    fetchBoard({ silent: true })                 // サイレント同期（UIを揺らさない）
-  }, 600)                                        // DB反映遅延に強く
-}
+/* ========= スケジュール判定 ========= */
+function isScheduledFor (h, dateISO) {
+  if (h?.start_date && dateISO < h.start_date) return false
+  if (h?.end_date && dateISO > h.end_date) return false
 
-/* その日が実施対象か？ */
-function isScheduledFor(habit, dateISO) {
-  if (habit?.start_date && dateISO < habit.start_date) return false
-  if (habit?.end_date   && dateISO > habit.end_date)   return false
-  const dt = new Date(dateISO)
-  const dow = ((dt.getDay() + 6) % 7) + 1
-  switch (habit?.frequency_type) {
-    case 'daily':    return true
-    case 'weekdays': return dow >= 1 && dow <= 5
-    case 'weekends': return dow === 6 || dow === 7
-    case 'custom':   return Array.isArray(habit?.days_of_week)
-                       && habit.days_of_week.map(Number).includes(dow)
-    case 'quota':    return true
-    default:         return true
+  const dt = new Date(dateISO + 'T00:00:00')
+  const dow = ((dt.getDay() + 6) % 7) + 1 // 1=Mon ... 7=Sun
+
+  switch (h?.frequency_type) {
+    case 'daily':     return true
+    case 'weekdays':  return dow >= 1 && dow <= 5
+    case 'weekends':  return dow === 6 || dow === 7
+    case 'custom':
+    case 'weekly':
+      return Array.isArray(h?.days_of_week) && h.days_of_week.map(Number).includes(dow)
+    case 'quota':
+    default:
+      return true
   }
 }
 
-/* 週グラフ再計算 */
-function recomputeRates() {
-  const s = startOfWeek(state.start)
-  const next = new Array(7).fill(0)
+/* ========= 完了判定 ========= */
+function normalizeDone (h, log) {
+  if (!log) return false
+  if (h?.evaluation_type === 'self') {
+    return (log.rating ?? 0) >= 4
+  }
+  return log.status === 'done'
+}
+
+function isDone (habitId, dateISO, slot = 0) {
+  const h = state.habits.find(x => x.id === habitId)
+  const k = logKey(habitId, dateISO, toSlotNum(slot))
+  const log = state.checks[k]
+  return normalizeDone(h, log)
+}
+
+/* ========= 週グラフ再計算 ========= */
+function recomputeRates () {
+  const arr = new Array(7).fill(0)
   for (let i = 0; i < 7; i++) {
-    const dateISO = isoLocal(addDays(s, i))
+    const dateISO = isoLocal(addDays(state.start, i))
     const planned = state.habits.filter(h => isScheduledFor(h, dateISO))
     const den = planned.length
-    if (!den) { next[i] = 0; continue }
-    const num = planned.reduce((acc, h) => acc + (state.checks[`${h.id}|${dateISO}`] ? 1 : 0), 0)
-    next[i] = Math.round((num * 100) / den)
+    if (!den) { arr[i] = 0; continue }
+
+    let num = 0
+    for (const h of planned) {
+      const slotNum = toSlotNum(h.time_slot)
+      const log = state.checks[logKey(h.id, dateISO, slotNum)]
+      if (normalizeDone(h, log)) num++
+    }
+    arr[i] = Math.round(num / den * 100)
   }
-  state.rates = next
+  state.rates = arr
+  state.lastFetchedAt = Date.now()
 }
 
-/* ---- スナップショット ---- */
-function saveSnapshot() {
-  try {
-    localStorage.setItem(SNAP_KEY, JSON.stringify({
-      start: isoLocal(startOfWeek(state.start)),
-      habits: state.habits,
-      checks: state.checks,
-      rates: state.rates,
-      ts: Date.now(),
-    }))
-  } catch {}
-}
-function hydrateFromSnapshot() {
-  try {
-    const raw = localStorage.getItem(SNAP_KEY)
-    if (!raw) return false
-    const snap = JSON.parse(raw)
-    if (snap.start) state.start = startOfWeek(new Date(snap.start))
-    state.habits = Array.isArray(snap.habits) ? snap.habits : []
-    state.checks = snap.checks || {}
-    state.rates  = Array.isArray(snap.rates) && snap.rates.length === 7 ? snap.rates : state.rates
-    state.lastFetchedAt = snap.ts || 0
-    return true
-  } catch { return false }
-}
+/* ========= fetchBoard ========= */
+async function fetchBoard ({ silent = true } = {}) {
+  const auth = safeAuth()
+  // 🔒 認証がまだ確定してない/未ログインなら叩かない
+  if (!auth?.fetchedOnce || !auth?.isAuthenticated) {
+    // console.info('[useHabitBoard] fetchBoard skipped (auth not ready)')
+    return
+  }
 
-/* ---- 鮮度判定 & フェッチ ---- */
-function isFresh(ms = 60_000) {
-  return Date.now() - state.lastFetchedAt < ms
-}
-
-async function fetchBoard({ silent = true } = {}) {
   if (!silent) state.loading = true
   try {
     const { data } = await axios.get('/api/weekly-board', {
-      params: { start: isoLocal(startOfWeek(state.start)), _t: Date.now() }
+      params: { start: isoLocal(startOfWeek(state.start)), _t: Date.now() },
     })
-    if (data?.week_start) state.start = startOfWeek(new Date(data.week_start))
-    state.habits = data?.habits ?? []
 
-    // サーバの checks
-    const server = {}
-    ;(data?.checks ?? []).forEach(r => { server[`${r.habit_id}|${r.date}`] = !!r.value })
-
-    // ▼ マージポリシー：
-    //   1) そのキーが「保留中 or 直近触った(LOCAL_WIN_MS以内)」ならローカル優先
-    //   2) それ以外はサーバ優先
-    const now = Date.now()
-    const merged = { ...server }
-    // ローカルにしか無いキーも保護
-    for (const k of new Set([...Object.keys(server), ...Object.keys(state.checks)])) {
-      const pending = (_pendingByKey[k] || 0) > 0
-      const recent  = (now - (_touchedAt[k] || 0)) < LOCAL_WIN_MS
-      if ((pending || recent) && k in state.checks) {
-        merged[k] = state.checks[k]
-      }
-      // 期限切れは掃除
-      if (!pending && (now - (_touchedAt[k] || 0)) >= LOCAL_WIN_MS) {
-        delete _touchedAt[k]
-      }
+    if (data?.week_start) {
+      state.start = startOfWeek(new Date(data.week_start))
     }
-    state.checks = merged
 
-    recomputeRates()
+    state.habits = (data?.habits ?? []).map(h => {
+      const slotNum = toSlotNum(h.time_slot)
+      return { ...h, time_slot: slotNum }
+    })
+
+    // 不要になったログを掃除
+    const validIds = new Set(state.habits.map(h => h.id))
+    for (const key of Object.keys(state.checks)) {
+      const [habitId] = key.split('|')
+      if (!validIds.has(Number(habitId))) delete state.checks[key]
+    }
+
     state.lastFetchedAt = Date.now()
-    saveSnapshot()
+    // boardを取れたときだけレート再計算
+    recomputeRates()
+  } catch (e) {
+    // 401は静かに握る（認証タイミングのラグ対策）
+    if (e?.response?.status === 401) {
+      // console.info('[useHabitBoard] fetchBoard 401 (probably session not attached yet)')
+    } else {
+      console.error('[useHabitBoard] fetchBoard failed', e)
+    }
   } finally {
     if (!silent) state.loading = false
   }
 }
 
-/* ---- トグル ---- */
-function normalizeStatus(s, fallback) {
-  if (s === true || s === 'checked' || s === 1) return true
-  if (s === false || s === 'unchecked' || s === 0) return false
-  return !!fallback
-}
+/* ========= toggle ========= */
+async function toggle (habitId, dateISO, action = 'toggle', slot = 0, rating = null) {
+  const auth = safeAuth()
+  if (!auth?.isAuthenticated) {
+    throw new Error('not authenticated')
+  }
 
-async function toggle(habitId, dateISO, value) {
-  const k = `${habitId}|${dateISO}`
-  const prev = !!state.checks[k]
-  const desired = !!value
+  const slotNum = toSlotNum(slot)
+  const k = logKey(habitId, dateISO, slotNum)
+  const prev = state.checks[k] ?? { status: 'none', rating: 0, updated_at: null, done: false }
   const opId = nextOpId(k)
+  const h = state.habits.find(x => x.id === habitId)
 
-  // 楽観反映（即表示）
-  state.checks = { ...state.checks, [k]: desired }
+  let next = {
+    ...prev,
+    habit_id: habitId,
+    date: dateISO,
+    time_slot: slotNum,
+    updated_at: new Date().toISOString(),
+  }
+
+  if (action === 'rating') {
+    next.rating = rating
+    next.status = rating >= 4 ? 'done' : 'none'
+  } else {
+    const wantDone = prev.status !== 'done'
+    next.status = wantDone ? 'done' : 'none'
+    if (h?.evaluation_type === 'self') {
+      next.rating = wantDone ? 4 : 0
+    }
+  }
+  next.done = normalizeDone(h, next)
+
+  state.checks = { ...state.checks, [k]: next }
   recomputeRates()
-  saveSnapshot?.()
-  markTouched(k)
   incPending(k)
 
   try {
-    _activeRequests++
-    const { data } = await axios.post('/api/habit-logs/toggle', {
-      habit_id: habitId, date: dateISO, value: desired
-    })
-
-    // 古い応答は捨てる
-    if (!isLatest(k, opId)) return { ok: true, status: state.checks[k], ignored: 'stale' }
-
-    const effective = normalizeStatus(data?.status, desired)
-    if (effective !== desired) {
-      state.checks = { ...state.checks, [k]: effective }
-      recomputeRates()
-      saveSnapshot?.()
+    const payload = {
+      habit_id: habitId,
+      date: dateISO,
+      time_slot: slotNum,
+      rating: next.rating,
+      status: next.status,
+      action,
     }
-    return { ok: true, status: state.checks[k] }
+
+    const { data } = await axios.post('/api/habit-logs/toggle', payload)
+    if (!isLatest(k, opId)) return
+
+    const ratingVal = data?.rating ?? next.rating ?? 0
+    let finalStatus = (h?.evaluation_type === 'self')
+      ? (ratingVal >= 4 ? 'done' : 'none')
+      : (data?.status === 'done' ? 'done' : 'none')
+
+    state.checks = {
+      ...state.checks,
+      [k]: {
+        habit_id: habitId,
+        date: dateISO,
+        time_slot: slotNum,
+        status: finalStatus,
+        rating: ratingVal,
+        updated_at: data?.updated_at ?? new Date().toISOString(),
+        done: normalizeDone(h, { status: finalStatus, rating: ratingVal }),
+      },
+    }
+
+    recomputeRates()
   } catch (e) {
-    if (isLatest(k, opId)) {
-      // 最新操作の失敗のみロールバック
-      state.checks = { ...state.checks, [k]: prev }
-      recomputeRates()
-      saveSnapshot?.()
-    }
-    console.error(e)
-    return { ok: false, error: e }
+    // 401などで失敗したら元に戻す
+    state.checks = { ...state.checks, [k]: prev }
+    recomputeRates()
   } finally {
     decPending(k)
-    _activeRequests = Math.max(0, _activeRequests - 1)
-    scheduleReconcileAfterAll()
   }
 }
 
-export function useHabitBoard() {
-  return { state, todayISO, fetchBoard, toggle, recomputeRates, hydrateFromSnapshot, isFresh }
+/* ========= loadLogs ========= */
+async function loadLogs (startISO, endISO) {
+  const auth = safeAuth()
+  if (!auth?.fetchedOnce || !auth?.isAuthenticated) {
+    return
+  }
+
+  try {
+    const { data } = await axios.get('/api/habit-logs', {
+      params: { start: startISO, end: endISO },
+    })
+    const newChecks = { ...state.checks }
+    for (const log of (data?.logs ?? [])) {
+      const slotNum = toSlotNum(log.time_slot)
+      const key = logKey(log.habit_id, log.date, slotNum)
+      const h = state.habits.find(x => x.id === log.habit_id)
+
+      const ratingVal = log.rating ?? 0
+      const status = (h?.evaluation_type === 'self')
+        ? (ratingVal >= 4 ? 'done' : 'none')
+        : (log.status === 'done' ? 'done' : 'none')
+
+      newChecks[key] = {
+        habit_id: log.habit_id,
+        date: log.date,
+        time_slot: slotNum,
+        status,
+        rating: ratingVal,
+        updated_at: log.updated_at ?? null,
+        done: normalizeDone(h, { status, rating: ratingVal }),
+      }
+    }
+    state.checks = newChecks
+    recomputeRates()
+  } catch (e) {
+    if (e?.response?.status === 401) {
+      // console.info('[useHabitBoard] loadLogs 401 (auth not ready)')
+    } else {
+      console.error('[useHabitBoard] loadLogs failed', e)
+    }
+  }
+}
+
+/* ========= 正規化取得 ========= */
+function getLog (habitId, dateISO, slot = 0) {
+  const k = logKey(habitId, dateISO, toSlotNum(slot))
+  const base = state.checks[k]
+  if (!base) {
+    return {
+      habit_id: habitId,
+      date: dateISO,
+      time_slot: slot,
+      status: 'none',
+      rating: 0,
+      updated_at: null,
+      done: false,
+    }
+  }
+
+  const h = state.habits.find(x => x.id === habitId)
+  const ratingVal = base.rating ?? 0
+  const status = base.status
+  const done = normalizeDone(h, base)
+
+  return {
+    ...base,
+    habit_id: habitId,
+    date: dateISO,
+    time_slot: slot,
+    status,
+    rating: ratingVal,
+    done,
+  }
+}
+
+/* ========= auth を安全に取るヘルパ ========= */
+function safeAuth () {
+  try {
+    return useAuthStore()
+  } catch {
+    return null
+  }
+}
+
+/* ========= ブラウザイベントで自動再取得 ========= */
+// ログインが終わったら現在週を読み直す
+if (typeof window !== 'undefined') {
+  const reloadWeek = () => {
+    const start = isoLocal(startOfWeek(new Date()))
+    const end = isoLocal(addDays(startOfWeek(new Date()), 6))
+    fetchBoard({ silent: true })
+      .then(() => loadLogs(start, end))
+      .catch(() => {})
+  }
+
+  window.addEventListener('auth:ready', reloadWeek)
+  window.addEventListener('auth:logged-in', reloadWeek)
+
+  window.addEventListener('auth:logged-out', () => {
+    state.habits = []
+    state.checks = {}
+    state.rates = new Array(7).fill(0)
+  })
+}
+
+/* ========= export ========= */
+export function useHabitBoard () {
+  return {
+    state,
+    todayISO,
+    fetchBoard,
+    toggle,
+    recomputeRates,
+    loadLogs,
+    getLog,
+    isScheduledFor,
+    logKey,
+    isDone,
+  }
 }
