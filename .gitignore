@@ -37,3 +37,4 @@ Thumbs.db
 
 # ローカル専用の env バリアント
 .env.*.local
+*.zip
