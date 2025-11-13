@@ -18,13 +18,16 @@ use App\Models\HabitLog;
 use Carbon\Carbon;
 
 /**
- * 方針（恒久）:
- * - /api では web系ミドルウェアを直積みしない（EncryptCookies/StartSession 等）
- * - 認証必須は自作ミドルウェア 'auth.api' を使用（未認証は常に JSON 401）
+ * routes/api.php
+ *
+ * 方針（開発をまず安定させる版）:
+ * - SPA の Cookie 認証を素直に通すため、認証は `auth:sanctum` を使用
+ *   （以前の custom middleware 'auth.api' は一旦休止。戻す場合は alias 登録必須）
+ * - API はすべて JSON を返す
  */
 
 /* =========================================================
- | 1. 認証なしで叩けるAPI
+ | 1. 認証不要 API
  * =======================================================*/
 
 // ヘルスチェック
@@ -43,10 +46,6 @@ Route::get('/auth/state', function (Request $request) {
     ]);
 })->name('api.auth.state');
 
-// Push の公開テスト（必要なら後で閉じる）
-Route::post('/save-subscription', [PushSubscriptionController::class, 'store']);
-Route::post('/push/test-public', [PushSubscriptionController::class, 'test']);
-
 // ローカル限定のデバッグ系
 if (app()->environment('local')) {
     Route::get('/_debug/session', function (Request $r) {
@@ -61,7 +60,7 @@ if (app()->environment('local')) {
     Route::get('/_debug/auth', function (Request $request) {
         return response()->json([
             'request_user' => $request->user(),
-            'cookies'      => $request->cookies->all()
+            'cookies'      => $request->cookies->all(),
         ]);
     });
 
@@ -78,18 +77,26 @@ if (app()->environment('local')) {
             'route_mw'     => optional($route)->gatherMiddleware(),
         ]);
     })->name('api._trace');
+
+    // 開発中の互換（※本番では無効にする）
+    Route::post('/save-subscription', [PushSubscriptionController::class, 'store'])
+        ->name('api.push.save-subscription.local');
+
+    Route::post('/push/test-public', [PushSubscriptionController::class, 'test'])
+        ->middleware('throttle:10,1')
+        ->name('api.push.test-public.local');
 }
 
 /* =========================================================
- | 2. 認証が必要なAPI（auth.api）
+ | 2. 認証必須 API（auth:sanctum）
  * =======================================================*/
 
-Route::middleware('auth.api')->group(function () {
+Route::middleware('auth:sanctum')->group(function () {
 
-    // ---- 現在のログインユーザー ----
+    // 現在のログインユーザー
     Route::get('/user', fn (Request $request) => $request->user())->name('api.user');
 
-    // ---- 習慣 CRUD（SPA 用）----
+    // 習慣 CRUD（SPA 用）
     Route::apiResource('habits', ApiHabitController::class)
         ->only(['index', 'store', 'show', 'update', 'destroy'])
         ->names([
@@ -100,7 +107,7 @@ Route::middleware('auth.api')->group(function () {
             'destroy' => 'api.habits.destroy',
         ]);
 
-    // ---- 今日ぶん初期化 ----
+    // 今日ぶん初期化
     Route::post('/habits/{habit}/init-today', [HabitInitController::class, 'initToday'])
         ->whereNumber('habit')
         ->name('api.habits.init-today');
@@ -108,36 +115,48 @@ Route::middleware('auth.api')->group(function () {
     Route::post('/habits/init-today', [HabitInitController::class, 'initTodayForMe'])
         ->name('api.habits.init-today-for-me');
 
-    // ---- Today 集約API ----
+    // Today 集約API
     Route::get('/today', [TodayController::class, 'show'])
         ->name('api.today');
 
-    // ---- 統計 / 週ボード ----
+    // 統計 / 週ボード
     Route::get('/weekly-board', [StatsController::class, 'weeklyBoard'])
         ->name('api.weekly-board');
 
     Route::get('/achievement/weekly', [StatsController::class, 'weeklyByDay'])
         ->name('api.achievement.weekly');
 
-    // ---- チェックのトグル ----
+    // チェックのトグル
     Route::post('/habit-logs/toggle', [HabitLogController::class, 'toggle'])
         ->name('api.habit-logs.toggle');
 
-    // ---- Push購読（認証ユーザー用）----
+    /* ---------------- Push 購読API（morphMany: users -> push_subscriptions） ---------------- */
+
+    // 推奨: RESTful 形
+    Route::post('/push/subscriptions', [PushSubscriptionController::class, 'store'])
+        ->name('api.push.subscriptions.store');
+
+    Route::delete('/push/subscriptions', [PushSubscriptionController::class, 'destroy'])
+        ->name('api.push.subscriptions.destroy');
+
+    // 互換（既存フロントが使っている場合のため残す）
     Route::post('/push/subscribe', [PushSubscriptionController::class, 'store'])
-        ->name('api.push.subscribe');
+        ->name('api.push.subscribe'); // alias
 
     Route::delete('/push/unsubscribe', [PushSubscriptionController::class, 'destroy'])
-        ->name('api.push.unsubscribe');
+        ->name('api.push.unsubscribe'); // alias
 
+    // テスト送信（本番では無効化を推奨）
     Route::post('/push/test', [PushSubscriptionController::class, 'test'])
+        ->middleware('throttle:10,1')
         ->name('api.push.test');
 
-    // ---- Pushデバッグ ----
+    // 任意の Push デバッグ（必要なら Gate/Policy）
     Route::post('/push/debug', [PushDebugController::class, 'send'])
         ->name('api.push.debug');
 
-    // ---- リマインダー操作 ----
+    /* ---------------- リマインダー操作 ---------------- */
+
     Route::post('/reminders/{task}/done', [RemindTaskActionController::class, 'done'])
         ->whereNumber('task')
         ->middleware('can:done,task')
@@ -153,21 +172,8 @@ Route::middleware('auth.api')->group(function () {
         ->middleware('can:snooze,task')
         ->name('api.reminders.snooze');
 
-    // ---- リマインドタスク ----
-    Route::post('/remind-tasks', [RemindTaskController::class, 'store'])
-        ->name('api.remind-tasks.store');
+    /* ---------------- チェック履歴 取得（期間スキャン） ---------------- */
 
-    // 静的パスを先に
-    Route::get('/remind-tasks/latest-by-habit', [RemindTaskController::class, 'latestPendingByHabit'])
-        ->name('api.remind-tasks.latest-by-habit');
-
-    // 動的パスは後ろ
-    Route::get('/remind-tasks/{task}', [RemindTaskController::class, 'show'])
-        ->whereNumber('task')
-        ->middleware('can:view,task')
-        ->name('api.remind-tasks.show');
-
-    // ---- チェック履歴 取得（期間スキャン）----
     Route::get('/habit-logs', function (Request $request) {
         $userId = $request->user()->id;
         $start  = $request->query('start');

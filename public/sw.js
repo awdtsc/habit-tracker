@@ -79,7 +79,8 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
   const raw = event.notification?.data || {};
-  const taskIdRaw = raw.taskId ?? raw.task_id;
+  // ★ 互換対応: taskId / task_id / remind_task_id のいずれでも受ける
+  const taskIdRaw = raw.taskId ?? raw.task_id ?? raw.remind_task_id;
   const habitIdRaw = raw.habitId ?? raw.habit_id;
 
   const taskId = Number(taskIdRaw);

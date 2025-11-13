@@ -8,29 +8,27 @@ use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
 use App\Models\Habit;
-use App\Models\HabitTime;
 use App\Models\HabitLog;
 use App\Models\RemindTask;
 
 /**
- * habits:init-daily
+ * habits:init-daily-legacy
  *
- * 「9月方式」：
- *  1) 指定日の HabitLog を不足分だけ作成（1習慣1日1件, 冪等）
+ * 「9月方式（レガシー）」：
+ *  1) 指定日の HabitLog を不足分だけ作成（1習慣1日1件, 冪等・time_slot=0）
  *  2) HabitTime をもとに同日の RemindTask(pending, remind_at=JST) を不足分だけ作成（冪等）
  *
- * - RemindTask は現行スキーマ（remind_at, habit_log_id, UNIQUE(habit_log_id,remind_at)）に準拠
- * - 曜日判定は Habit::isScheduledFor($date, null) があれば優先。無ければローカル実装にフォールバック
+ * ※ 新型は HabitsInitDailyCommand（`habits:init-daily {date?} [--user=]`）。本コマンドは互換目的のみ。
  */
-class InitDailyHabitLogs extends Command
+class InitDailyHabitLogsLegacy extends Command
 {
-    protected $signature = 'habits:init-daily
+    protected $signature = 'habits:init-daily-legacy
                             {--date= : target date YYYY-MM-DD (JST, default=today)}
                             {--now= : reference time YYYY-MM-DD HH:MM:SS (JST, for log only)}
                             {--habit-id=* : target habit ids (repeatable)}
                             {--dry-run : simulate without insert/update}';
 
-    protected $description = 'Create daily HabitLog and same-day RemindTask(pending) idempotently (September mode)';
+    protected $description = '[LEGACY] September mode: Create daily HabitLog (slot=0) and same-day RemindTask(pending) idempotently';
 
     /** アプリ標準TZ（保存・比較はこのローカル基準で扱う想定） */
     private const APP_TZ = 'Asia/Tokyo';
@@ -46,6 +44,8 @@ class InitDailyHabitLogs extends Command
 
     public function handle(): int
     {
+        $this->warn('[LEGACY] This command is deprecated. Use: php artisan habits:init-daily {date?} [--user=]');
+
         $tz  = self::APP_TZ;
         $now = $this->option('now')
             ? Carbon::parse($this->option('now'), $tz)
@@ -59,7 +59,7 @@ class InitDailyHabitLogs extends Command
         $dryRun    = (bool)$this->option('dry-run');
 
         $this->info(sprintf(
-            '[init-daily] date=%s now=%s (tz=%s) dryRun=%s',
+            '[init-daily-legacy] date=%s now=%s (tz=%s) dryRun=%s',
             $dateTz->toDateString(), $now->toDateTimeString(), $tz, $dryRun ? 'yes' : 'no'
         ));
 
@@ -72,7 +72,6 @@ class InitDailyHabitLogs extends Command
             'skipped_notimed'     => 0,
         ];
 
-        // 対象Habit（times先読み）。★アロー関数(fn)に use は不可なので通常クロージャで統一
         $habitsQ = Habit::query()
             ->with('times')
             ->when($this->hasCol(Habit::query(), 'archived'), function ($q) {
@@ -97,7 +96,6 @@ class InitDailyHabitLogs extends Command
         $habitsQ->chunkById(500, function ($habits) use ($dateTz, $tz, $dryRun, $stats) {
             /** @var Habit $habit */
             foreach ($habits as $habit) {
-                // ① 予定日かどうか（モデルの isScheduledFor があれば優先）
                 $planned = method_exists($habit, 'isScheduledFor')
                     ? (bool)$habit->isScheduledFor($dateTz, null)
                     : $this->isHabitPlannedForDate($habit, $dateTz);
@@ -107,18 +105,15 @@ class InitDailyHabitLogs extends Command
                     continue;
                 }
 
-                // ② HabitLog を当日分だけ冪等作成
                 [$log, $created] = $this->ensureDailyHabitLog($habit, $dateTz, $dryRun);
                 $created ? $stats->logs_created++ : $stats->logs_existing++;
 
-                // ③ HabitTime が無ければ通知は作らない
                 $times = $habit->times ?? collect();
                 if ($times->isEmpty()) {
                     $stats->skipped_notimed++;
                     continue;
                 }
 
-                // ④ HabitTime ごとに当日の RemindTask(pending) を冪等作成
                 foreach ($times as $ht) {
                     $timeStr  = $this->resolveNotifyTime($ht->notify_time ?? null, (int)($ht->time_slot ?? 0));
                     $remindAt = Carbon::parse($dateTz->toDateString() . ' ' . $timeStr, $tz)->toDateTimeString();
@@ -132,10 +127,9 @@ class InitDailyHabitLogs extends Command
                         continue;
                     }
 
-                    // (habit_log_id, remind_at) でユニーク（insertOrIgnoreで冪等）
                     $ins = DB::table((new RemindTask())->getTable())->insertOrIgnore([
                         'habit_log_id' => $log->id,
-                        'remind_at'    => $remindAt,                                // JST保存
+                        'remind_at'    => $remindAt,
                         'status'       => defined(RemindTask::class.'::STATUS_PENDING')
                                             ? RemindTask::STATUS_PENDING
                                             : 'pending',
@@ -160,11 +154,10 @@ class InitDailyHabitLogs extends Command
         $this->info("Skipped not planned: {$stats->skipped_notplanned}");
         $this->info("Skipped no times  : {$stats->skipped_notimed}");
 
-        Log::info('habits:init-daily done', (array)$stats);
+        Log::info('habits:init-daily-legacy done', (array)$stats);
         return self::SUCCESS;
     }
 
-    /** 当日分 HabitLog を冪等作成（1習慣1日1件）。[HabitLog, bool created] */
     private function ensureDailyHabitLog(Habit $habit, Carbon $dateTz, bool $dryRun): array
     {
         $date = $dateTz->toDateString();
@@ -180,8 +173,6 @@ class InitDailyHabitLogs extends Command
 
         if ($dryRun) {
             $this->line(sprintf('[DRY] HabitLog INSERT: habit#%d date=%s status=none', $habit->id, $date));
-            // DRYではDBに作らないため、以降の表示のためダミーは返さず既存扱いでもOK
-            // ただしRemindTaskのDRY出力を見たい場合は以下のようにダミーIDを返す実装に変えても良い
             $fake = new HabitLog([
                 'habit_id' => $habit->id,
                 'user_id'  => $habit->user_id ?? null,
@@ -208,7 +199,6 @@ class InitDailyHabitLogs extends Command
         return [$log, true];
     }
 
-    /** HabitTime→通知時刻（HH:MM:SS）を解決（notify_time優先→slot既定） */
     private function resolveNotifyTime(?string $notifyTime, int $slot): string
     {
         if (is_string($notifyTime) && preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $notifyTime)) {
@@ -217,14 +207,6 @@ class InitDailyHabitLogs extends Command
         return self::SLOT_DEFAULT[$slot] ?? self::SLOT_DEFAULT[0];
     }
 
-    /**
-     * フォールバック予定日判定（モデルに isScheduledFor が無い場合に使用）
-     * - archived=false 必須（カラムがあれば）
-     * - start_date/end_date で範囲チェック
-     * - days_of_week が
-     *   - JSON配列 / カンマ区切り / 数値ビットマスク(1<<0=Sun..1<<6=Sat) のいずれにも対応
-     *   - ISO 1..7 に合わせたい場合はモデル側実装を推奨
-     */
     private function isHabitPlannedForDate(Habit $habit, Carbon $dateTz): bool
     {
         $date = $dateTz->toDateString();
@@ -264,7 +246,6 @@ class InitDailyHabitLogs extends Command
         return true;
     }
 
-    /** テーブルのカラム存在チェック（テーブル単位キャッシュ） */
     private function hasCol($query, string $column): bool
     {
         try {

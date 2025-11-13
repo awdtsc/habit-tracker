@@ -3,14 +3,15 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Console\Scheduling\Schedule; // [CHANGED] スケジューラ用
-use Illuminate\Support\Facades\Log;
-
-// Sanctum: セッション連動（SPA向け）
+use Illuminate\Console\Scheduling\Schedule;
 use Laravel\Sanctum\Http\Middleware\AuthenticateSession;
 
-// API用の401 JSON固定ミドルウェア
 use App\Http\Middleware\EnsureApiAuthenticated;
+
+// === Commands ===
+use App\Console\Commands\HabitsInitDailyCommand;  // habits:init-daily（ログ生成のみ）
+use App\Console\Commands\RemindSendDueCommand;    // remind:send-due（送信専任）
+use App\Console\Commands\RemindScheduleDue;       // remind:schedule-due（今日分タスク生成）
 
 return Application::configure(basePath: dirname(__DIR__))
 
@@ -19,20 +20,18 @@ return Application::configure(basePath: dirname(__DIR__))
         api: __DIR__ . '/../routes/api.php',
         commands: __DIR__ . '/../routes/console.php',
         channels: __DIR__ . '/../routes/channels.php',
+        health: '/up',
     )
 
-    // ミドルウェア設定（Laravel 11/12 方式）
+    // Laravel 11/12 方式のミドルウェア設定
     ->withMiddleware(function (Middleware $middleware) {
-        /**
-         * ✅ 最重要：SPA（例: Vite:5173）からの /api/* を
-         *    「stateful（Cookie認証）」として扱う
-         */
+        // SPA からの /api/* を stateful（Cookie 認証）として扱う
         $middleware->statefulApi();
 
-        // webグループに Sanctum のセッション連動を付与（/login 後のセッション維持）
+        // /login 後のセッション維持（Sanctum）
         $middleware->appendToGroup('web', AuthenticateSession::class);
 
-        // API 用ミドルウェアの別名（未認証は常に JSON 401 を返す）
+        // API未認証は常に JSON 401
         $middleware->alias([
             'auth.api' => EnsureApiAuthenticated::class,
         ]);
@@ -42,25 +41,46 @@ return Application::configure(basePath: dirname(__DIR__))
         // 必要に応じてハンドラ追加
     })
 
-    // === スケジューラ定義はここに集約（Laravel 11/12 標準） ===
+    // === スケジューラ ===
+    // Windows のタスクスケジューラはそのままでも、
+    // フラグで “中身を無効化” できるキルスイッチ方式。
     ->withSchedule(function (Schedule $schedule) {
-        /**
-         * ✅ 必要最小限：予定時刻到来時の自動生成だけを毎分実行
-         *    - HabitLog/RemindTask の自動生成（冪等）
-         *    - 送信系（reminders:dispatch）や Heartbeat は一旦停止
-         */
-        $schedule->command('remind:schedule-due') // [CHANGED]
+        $tz = config('app.timezone', 'Asia/Tokyo');
+
+        // config/remind.php を優先し、無ければ .env の SCHEDULE_* を読む
+        $enableGenerate = (bool) config('remind.enable_scheduler', env('SCHEDULE_REMIND_GENERATE', false));
+        $enableSend     = (bool) config('remind.enable_sender',    env('SCHEDULE_REMIND_SEND',     false));
+        $enableInit     = (bool) config('remind.enable_init_daily',env('SCHEDULE_INIT_DAILY',      false));
+
+        // RemindTask 生成（毎分）— when() で完全停止可
+        $schedule->command('remind:schedule-due')
             ->everyMinute()
+            ->timezone($tz)
             ->withoutOverlapping()
-            ->name('remind:schedule-due')
-            ->description('Create RemindTasks for due times every minute'); // [CHANGED]
+            ->when(fn () => $enableGenerate)
+            ->description('Create RemindTasks for due times every minute');
+
+        // RemindTask 送信（毎分）— when() で完全停止可
+        $schedule->command('remind:send-due')
+            ->everyMinute()
+            ->timezone($tz)
+            ->withoutOverlapping()
+            ->when(fn () => $enableSend)
+            ->description('Send due RemindTasks every minute');
+
+        // （任意）日次ログ生成
+        $schedule->command('habits:init-daily')
+            ->dailyAt('00:00')
+            ->timezone($tz)
+            ->when(fn () => $enableInit)
+            ->description('Idempotently create HabitLogs for today');
     })
 
-    // ★ クラスベースの Artisan コマンドを明示登録（実在クラスに合わせる）
+    // === Artisan コマンドの明示登録 ===
     ->withCommands([
-        \App\Console\Commands\InitDailyHabitLogs::class, // php artisan habits:init-daily
-        \App\Console\Commands\DispatchReminders::class,  // php artisan reminders:dispatch
-        \App\Console\Commands\RemindScheduleDue::class,  // php artisan remind:schedule-due
+        HabitsInitDailyCommand::class,
+        RemindSendDueCommand::class,
+        RemindScheduleDue::class, // 使っていなければ削除可
     ])
 
     ->create();

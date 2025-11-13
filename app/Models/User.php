@@ -6,42 +6,35 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use NotificationChannels\WebPush\HasPushSubscriptions;
+use Illuminate\Database\Eloquent\Relations\HasMany; // 追加
+use App\Models\PushSubscription;                    // 追加
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable, HasPushSubscriptions;
+    use HasApiTokens, HasFactory, Notifiable;
+    // ❌ HasPushSubscriptions は外す
+    // use NotificationChannels\WebPush\HasPushSubscriptions;
 
-    /**
-     * 一括代入を許可するカラム
-     */
-    protected $fillable = [
-        'name',
-        'email',
-        'password',
-    ];
+    protected $fillable = ['name','email','password'];
 
-    /**
-     * レスポンスに含めない属性
-     */
-    protected $hidden = [
-        'password',
-        'remember_token',
-    ];
+    protected $hidden = ['password','remember_token'];
 
-    /**
-     * キャスト
-     *
-     * ※ password の自動ハッシュは切っておく
-     *    -> tinkerで手動でbcryptしたいときに二重ハッシュにならないようにするため
-     */
     protected $casts = [
         'email_verified_at' => 'datetime',
-        // 'password' => 'hashed',  ← 今回はあえて外す
+        // 'password' => 'hashed', // 二重ハッシュ回避で外しておく
     ];
 
     /**
-     * WebPush チャネルのルーティング
+     * Push 購読（user_id 外部キー）
+     */
+    public function pushSubscriptions(): HasMany
+    {
+        return $this->hasMany(PushSubscription::class, 'user_id');
+    }
+
+    /**
+     * Laravel Notifications の WebPush ルーティング（必要なら）
+     * ※ この戻り値はコレクションでOK
      */
     public function routeNotificationForWebPush()
     {

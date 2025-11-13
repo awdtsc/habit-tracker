@@ -6,10 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * PushSubscription
+ * App\Models\PushSubscription
  *
- * Web Push の購読情報（端末ごとに 1 件を想定）
- * - endpoint は長い URL になるため TEXT。重複防止は endpoint_hash(sha256) の UNIQUE で担保
+ * Web Push の購読情報（端末ごと 1 件想定）
+ * - endpoint は長い URL。重複防止は endpoint_hash(sha256) の UNIQUE で担保
  * - user_id 必須。ユーザー削除時は CASCADE を推奨（migration 側）
  */
 class PushSubscription extends Model
@@ -17,7 +17,7 @@ class PushSubscription extends Model
     protected $table = 'push_subscriptions';
 
     /**
-     * 明示フィルアブル（guarded=[] ではなく、受け入れる項目を限定）
+     * 許可フィールド（明示）
      */
     protected $fillable = [
         'user_id',
@@ -36,7 +36,7 @@ class PushSubscription extends Model
     ];
 
     /**
-     * 保存時に endpoint_hash を自動計算（endpoint が空の場合はそのまま）
+     * 保存時に endpoint_hash を自動計算
      */
     protected static function booted(): void
     {
@@ -65,6 +65,7 @@ class PushSubscription extends Model
 
     /**
      * 所有ユーザー
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
      */
     public function user(): BelongsTo
     {
@@ -80,13 +81,14 @@ class PushSubscription extends Model
     }
 
     /**
-     * Web Push の subscribe() で得られるペイロードから Upsert
+     * WebPush subscribe() の payload から Upsert
      * $payload 例:
      *  {
      *    endpoint: "...",
      *    keys: { p256dh: "...", auth: "..." },
      *    contentEncoding: "aes128gcm" // or content_encoding
      *  }
+     * @return self
      */
     public static function upsertFromWebPush(int $userId, array $payload): self
     {
