@@ -24,7 +24,8 @@
                 $dows = old('days_of_week', []);
                 $dowJp = [1=>'月',2=>'火',3=>'水',4=>'木',5=>'金',6=>'土',7=>'日'];
                 $weeklyQuota = old('weekly_quota', 3);
-                $noEnd = old('no_end', true);  // 作成時は「終了日なし」をデフォルトON
+                $noEnd = old('no_end', true);
+                $notifyTime = old('notify_time', ''); // ★ 通知時刻の初期値
             @endphp
 
             <form method="POST" action="{{ route('habits.store') }}">
@@ -41,6 +42,16 @@
                 <div class="mb-4">
                     <label class="block font-bold mb-1">説明</label>
                     <textarea name="description" rows="3" class="w-full border rounded p-2">{{ old('description') }}</textarea>
+                </div>
+
+                {{-- 通知時刻 --}}
+                <div class="mb-4">
+                    <label class="block font-bold mb-1">通知時間（任意）</label>
+                    <input type="time" name="notify_time" value="{{ $notifyTime }}"
+                        class="w-40 border rounded p-2">
+                    <p class="mt-1 text-xs text-gray-500">
+                        ※ 指定するとこの習慣に紐づく通知時間が登録されます
+                    </p>
                 </div>
 
                 {{-- 頻度 --}}
@@ -61,7 +72,7 @@
                         @endforeach
                     </div>
 
-                    {{-- カスタム曜日（1=Mon … 7=Sun） --}}
+                    {{-- カスタム曜日 --}}
                     <div id="dowBox" class="mt-3 {{ $ft==='custom' ? '' : 'opacity-50 pointer-events-none' }}">
                         <div class="flex flex-wrap gap-3">
                             @foreach ($dowJp as $num => $jp)
@@ -75,7 +86,7 @@
                         <p class="mt-1 text-xs text-gray-500">※ カスタム選択時は曜日を指定</p>
                     </div>
 
-                    {{-- 週クオータ（週の回数） --}}
+                    {{-- 週クオータ --}}
                     <div id="quotaBox" class="mt-3 {{ $ft==='quota' ? '' : 'opacity-50 pointer-events-none' }}">
                         <label class="block font-bold mb-1">週の目標回数</label>
                         <input type="number" name="weekly_quota" min="1" max="7" step="1"
@@ -115,6 +126,22 @@
                                 <option value="{{ $v }}" {{ $slot===$v ? 'selected' : '' }}>{{ $l }}</option>
                             @endforeach
                         </select>
+                    </div>
+                    {{-- 評価方式 --}}
+                    <div class="mb-4">
+                        <label class="block font-bold mb-1">評価方式</label>
+                        @php $evalType = old('evaluation_type', 'simple'); @endphp
+                        <select name="evaluation_type" class="w-full border rounded p-2" required>
+                            <option value="simple" {{ $evalType==='simple' ? 'selected' : '' }}>
+                                単純評価（達成/未達成）
+                            </option>
+                            <option value="self" {{ $evalType==='self' ? 'selected' : '' }}>
+                                自己評価（点数やコメント付き）
+                            </option>
+                        </select>
+                        <p class="mt-1 text-xs text-gray-500">
+                            ※ 自己評価を選ぶと <code>habit_logs.rating</code> を使って1〜5点などで自己採点できます
+                        </p>
                     </div>
                     <div>
                         <label class="block font-bold mb-1">カテゴリ（任意）</label>

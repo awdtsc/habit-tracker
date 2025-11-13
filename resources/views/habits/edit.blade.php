@@ -29,11 +29,12 @@
                     $noEnd = old('no_end', is_null($habit->end_date));
                     $dowJp = [1=>'月',2=>'火',3=>'水',4=>'木',5=>'金',6=>'土',7=>'日'];
 
-                    // target_times は JSON/配列のどちらでも対応
                     $tt = $habit->target_times;
                     if (is_string($tt)) { $tt = json_decode($tt, true) ?: []; }
                     $weeklyQuotaDefault = $tt['weekly'] ?? null;
                     $weeklyQuota = old('weekly_quota', $weeklyQuotaDefault ?? 3);
+
+                    $evalType = old('evaluation_type', $habit->evaluation_type ?? 'simple');
                 @endphp
 
                 {{-- タイトル --}}
@@ -50,6 +51,15 @@
                     <textarea name="description" class="w-full border rounded p-2" rows="3">{{ old('description', $habit->description) }}</textarea>
                 </div>
 
+                {{-- 評価方式 --}}
+                <div class="mb-4">
+                    <label class="block font-bold mb-1">評価方式</label>
+                    <select name="evaluation_type" class="w-full border rounded p-2">
+                        <option value="simple" {{ $evalType==='simple' ? 'selected' : '' }}>単純評価（達成/未達成）</option>
+                        <option value="self"   {{ $evalType==='self' ? 'selected' : '' }}>自己評価（点数やコメント付き）</option>
+                    </select>
+                </div>
+
                 {{-- 頻度 --}}
                 <div class="mb-4">
                     <label class="block font-bold mb-2">頻度</label>
@@ -59,7 +69,7 @@
                             'weekdays' => '平日',
                             'weekends' => '週末',
                             'custom'   => 'カスタム（曜日指定）',
-                            'quota'    => '週の回数（自由）',  {{-- ★ 追加 --}}
+                            'quota'    => '週の回数（自由）',
                         ] as $val=>$label)
                             <label class="inline-flex items-center gap-2">
                                 <input type="radio" name="frequency_type" value="{{ $val }}" {{ $ft === $val ? 'checked' : '' }}>
@@ -68,7 +78,7 @@
                         @endforeach
                     </div>
 
-                    {{-- カスタム曜日（1=Mon … 7=Sun） --}}
+                    {{-- カスタム曜日 --}}
                     <div id="dowBox" class="mt-3 {{ $ft==='custom' ? '' : 'opacity-50 pointer-events-none' }}">
                         <div class="flex flex-wrap gap-3">
                             @foreach ($dowJp as $num=>$jp)
@@ -83,13 +93,13 @@
                         <p class="mt-1 text-xs text-gray-500">※ カスタム選択時は曜日を指定</p>
                     </div>
 
-                    {{-- 週クオータ（週の回数） --}}
+                    {{-- 週クオータ --}}
                     <div id="quotaBox" class="mt-3 {{ $ft==='quota' ? '' : 'opacity-50 pointer-events-none' }}">
                         <label class="block font-bold mb-1">週の目標回数</label>
                         <input type="number" name="weekly_quota" min="1" max="7" step="1"
                                value="{{ $weeklyQuota }}"
                                class="w-28 border rounded p-2">
-                        <p class="mt-1 text-xs text-gray-500">例: 3 → 「今週3回できれば達成」。曜日は自由</p>
+                        <p class="mt-1 text-xs text-gray-500">例: 3 → 「今週3回できれば達成」</p>
                     </div>
                 </div>
 
@@ -101,7 +111,6 @@
                                value="{{ old('start_date', optional($habit->start_date)->toDateString()) }}"
                                class="w-full border rounded p-2">
                     </div>
-
                     <div>
                         <label class="block font-bold mb-1">終了日</label>
                         <div class="flex items-center gap-3">
@@ -118,6 +127,22 @@
 
                 {{-- 任意メタ --}}
                 <div class="mb-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {{-- 評価方式 --}}
+                    <div class="mb-4">
+                        <label class="block font-bold mb-1">評価方式</label>
+                        @php $evalType = old('evaluation_type', 'simple'); @endphp
+                        <select name="evaluation_type" class="w-full border rounded p-2" required>
+                            <option value="simple" {{ $evalType==='simple' ? 'selected' : '' }}>
+                                単純評価（達成/未達成）
+                            </option>
+                            <option value="self" {{ $evalType==='self' ? 'selected' : '' }}>
+                                自己評価（点数やコメント付き）
+                            </option>
+                        </select>
+                        <p class="mt-1 text-xs text-gray-500">
+                            ※ 自己評価を選ぶと <code>habit_logs.rating</code> を使って1〜5点などで自己採点できます
+                        </p>
+                    </div>
                     <div>
                         <label class="block font-bold mb-1">時間帯（任意）</label>
                         @php $slot = old('time_slot', $habit->time_slot ?? 'anytime'); @endphp
