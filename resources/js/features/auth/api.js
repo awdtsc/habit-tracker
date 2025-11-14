@@ -1,19 +1,17 @@
 // resources/js/features/auth/api.js
-import axios from '../../bootstrap'
-import { useAuthStore } from '../../stores/auth'
+import axios from '@/bootstrap'
+import { useAuthStore } from '@/stores/auth'
 
 /**
- * いちどだけ CSRF Cookie を取りに行く
- * （同一オリジン Sanctum 前提なので /sanctum/csrf-cookie でOK）
+ * 1) CSRF Cookie を確実に取る
  */
 async function ensureCsrf () {
   await axios.get('/sanctum/csrf-cookie', { withCredentials: true })
 }
 
 /**
- * 401 を出さない“認証状態チェック”
- * routes/api.php の /api/auth/state に対応してる
- * shape: { authenticated: bool, user: {id, name, email} | null }
+ * 2) 安全な認証状態チェック (/api/auth/state)
+ *    → 401 が絶対に出ない
  */
 async function fetchAuthState () {
   const { data } = await axios.get('/api/auth/state', {
@@ -23,53 +21,38 @@ async function fetchAuthState () {
 }
 
 /**
- * ログイン処理（Sanctum + web セッション）
- * - ここでは **絶対に** /api/user を直撃しない
- * - ログイン直後の状態確認は /api/auth/state でやる
+ * 3) ログイン
+ *    - /login に POST する
+ *    - ログイン直後は /api/auth/state でユーザーを取得
+ *    - /api/user を叩くのは絶対 NG（401 の危険）
  */
 export async function login ({ email, password }) {
   const store = useAuthStore()
 
-  // 1) CSRF
+  // CSRF Cookie
   await ensureCsrf()
 
-  // 2) ログイン本体
-  await axios.post(
-    '/login',
-    { email, password },
-    {
-      withCredentials: true,
-    },
-  )
+  // ログイン本体
+  await axios.post('/login', { email, password }, { withCredentials: true })
 
-  // 3) 401 を出さないエンドポイントで現在ユーザーを取得
+  // セッションが付くので、必ず state を見に行く
   const state = await fetchAuthState()
 
   if (state?.authenticated && state?.user) {
     store.setUser(state.user)
-    // 初回フェッチ済みフラグがあるなら立てる
-    if ('fetchedOnce' in store) {
-      store.fetchedOnce = true
-    }
-
-    // ここでだけ push 初期化のイベントを投げる
+    store.fetchedOnce = true
     window.dispatchEvent(new CustomEvent('auth:logged-in'))
-
     return state.user
   }
 
-  // ここに来るのは「パスワードは合っててセッションも出来たけど
-  // /api/auth/state が user を返さなかった」みたいなレアケース
-  // とりあえずストアはクリアしておく
+  // ここはレアケース
   store.clear()
-  if ('fetchedOnce' in store) {
-    store.fetchedOnce = true
-  }
+  store.fetchedOnce = true
   return null
 }
 
 /**
- * ログアウト
+ * 4) ログアウト
  */
 export async function logout () {
   const store = useAuthStore()
@@ -78,20 +61,18 @@ export async function logout () {
   await axios.post('/logout', {}, { withCredentials: true })
 
   store.clear()
-  if ('fetchedOnce' in store) {
-    store.fetchedOnce = true
-  }
+  store.fetchedOnce = true
 
   window.dispatchEvent(new CustomEvent('auth:logged-out'))
 }
 
 /**
- * アプリ起動時に1回だけ現在のユーザーを同期したいとき用
- * （/login 画面では app.js 側で呼ばない設計になってるはず）
+ * 5) アプリ起動時に一度だけユーザーを同期
+ *    /api/user は使わず /api/auth/state を使う
  */
 export async function fetchMeOnce () {
   const store = useAuthStore()
-  if (store.fetchedOnce) return !!store.isAuthenticated
+  if (store.fetchedOnce) return store.isAuthenticated
 
   try {
     const state = await fetchAuthState()
@@ -100,10 +81,12 @@ export async function fetchMeOnce () {
       store.fetchedOnce = true
       return true
     }
+
+    // 未ログイン
     store.clear()
     store.fetchedOnce = true
     return false
-  } catch (e) {
+  } catch {
     store.clear()
     store.fetchedOnce = true
     return false
@@ -111,15 +94,17 @@ export async function fetchMeOnce () {
 }
 
 /**
- * 必要になったときだけ /api/user を叩きたいならこれを使う
- * （でも通常は /api/auth/state の方が安全）
+ * 6) 必要なときに明示的に /api/user を叩く
+ *    ※ 基本は使わない。/api/auth/state の方が安定。
  */
 export async function refreshMe () {
   const store = useAuthStore()
-  const { data } = await axios.get('/api/user', { withCredentials: true })
+
+  const { data } = await axios.get('/api/user', {
+    withCredentials: true,
+  })
+
   store.setUser(data)
-  if ('fetchedOnce' in store) {
-    store.fetchedOnce = true
-  }
+  store.fetchedOnce = true
   return data
 }
