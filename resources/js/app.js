@@ -9,36 +9,30 @@ import App from './App.vue'
 import router from './router'
 import axios from 'axios'
 
-// Backend / Auth
+// Auth store
+import { useAuthStore } from './stores/auth'
+
+// Backend utilities
 import { waitForBackendAlive, renderOfflineScreen } from './startup/offline'
 import { fetchCsrfCookie } from './startup/backend'
-import { setupAuthGuards } from './startup/auth-guards'
 
-// Remind（SW message + URL query + event bus）
+// Remind / Push
 import { setupRemindSystem } from './startup/remind'
-
-// Push
 import { registerSwAndPush } from './startup/push'
 
-// Alpine init
+// Alpine
 window.Alpine = Alpine
 Alpine.start()
 
-// SPA + Sanctum は必須
+// Sanctum cookie-mode
 axios.defaults.withCredentials = true
 
+;(async () => {
 
-; (async () => {
-
-  // -------------------------------------------------------
-  // 正確な login 判定
-  // history mode では /login が / に見えることがあるため
-  // -------------------------------------------------------
-  const raw = location.pathname.replace(/\/+$/, '')   // 末尾スラッシュ除去
-  const IS_LOGIN = (raw === '/login')
+  const IS_LOGIN = window.location.pathname.startsWith('/login')
 
   // -------------------------------------------------------
-  // STEP 1: Backend 生存チェック
+  // 1. Backend check
   // -------------------------------------------------------
   if (!(await waitForBackendAlive())) {
     console.warn('[startup] backend not alive')
@@ -46,26 +40,21 @@ axios.defaults.withCredentials = true
   }
 
   // -------------------------------------------------------
-  // STEP 2: CSRF Cookie をセット
+  // 2. CSRF Cookie
   // -------------------------------------------------------
-  const ok = await fetchCsrfCookie()
-  if (!ok) {
+  if (!(await fetchCsrfCookie())) {
     console.warn('[startup] csrf cookie fetch failed')
     return renderOfflineScreen()
   }
-  console.log('[startup] CSRF Cookie fetched')
 
   // -------------------------------------------------------
-  // STEP 3: #app 存在確認
+  // 3. #app check
   // -------------------------------------------------------
   const appEl = document.getElementById('app')
-  if (!appEl) {
-    console.warn('[APP] #app element not found')
-    return
-  }
+  if (!appEl) return
 
   // -------------------------------------------------------
-  // STEP 4: Vue アプリ構築
+  // 4. Vue App
   // -------------------------------------------------------
   const app = createApp(App)
   const pinia = createPinia()
@@ -73,36 +62,26 @@ axios.defaults.withCredentials = true
   app.use(pinia)
   app.use(router)
 
-  // -------------------------------------------------------
-  // STEP 5: 認証ガード登録
-  // -------------------------------------------------------
-  setupAuthGuards(router)
+  const auth = useAuthStore()
 
   // -------------------------------------------------------
-  // STEP 6: ログイン画面以外なら /api/user を事前ロード
+  // 5. SPA 起動時の認証 restore
   // -------------------------------------------------------
-  if (!IS_LOGIN) {
-    try {
-      const { fetchMeOnce } = await import('./features/auth/api')
-      await fetchMeOnce().catch(() => false)
-    } catch (e) {
-      console.warn('[startup] fetchMeOnce failed', e)
-    }
+  try {
+    await auth.restore()
+  } catch (e) {
+    console.warn('[startup] auth.restore failed', e)
   }
 
   // -------------------------------------------------------
-  // STEP 7: Router 準備完了
+  // 6. router.ready → mount
   // -------------------------------------------------------
   await router.isReady()
-
-  // -------------------------------------------------------
-  // STEP 8: Vue マウント
-  // -------------------------------------------------------
   app.mount(appEl)
-  console.log('[APP] Vue mounted successfully')
+  console.log('[APP] Vue mounted')
 
   // -------------------------------------------------------
-  // STEP 9: Remind / Push 起動
+  // 7. Remind / Push 起動（認証状態確定後）
   // -------------------------------------------------------
   setupRemindSystem()
   await registerSwAndPush(IS_LOGIN)

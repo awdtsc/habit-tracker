@@ -4,8 +4,9 @@ import axios from 'axios'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    user: null,
-    fetchedOnce: false,
+    user: null,          // ログイン中のユーザー
+    ready: false,        // ← 認証状態が「確定」しているか（最重要）
+    restoring: false,    // restore() の二重実行防止
   }),
 
   getters: {
@@ -14,31 +15,79 @@ export const useAuthStore = defineStore('auth', {
 
   actions: {
     /* ============================================================
-     * 1. 現在のユーザー (/api/user)
+     * 1. restore（SPA 起動時に必ず1回だけ）
      * ------------------------------------------------------------
-     * ・401 は通常状態なので throw しない
-     * ・成功時は this.user をセット
+     * ・初回だけ fetchUser() を実行
+     * ・backend 起動直後の 401/419 は正常
+     * ・ready が true になるまで待つ
+     * ============================================================ */
+    async restore() {
+      if (this.restoring || this.ready) {
+        return this.user
+      }
+
+      this.restoring = true
+      try {
+        await this.fetchUser()
+        return this.user
+      } finally {
+        this.restoring = false
+      }
+    },
+
+    /* ============================================================
+     * 2. fetchUser (/api/user)
+     * ------------------------------------------------------------
+     * ・401/419 は未ログインとして扱う（throw しない）
+     * ・fetch 後は必ず ready=true にする（重要）
      * ============================================================ */
     async fetchUser() {
       try {
         const res = await axios.get('/api/user')
         this.user = res.data
+        this.ready = true          // ← 認証状態が確定
         return this.user
       } catch (e) {
-        if (e?.response?.status === 401) {
-          this.user = null
+        const code = e?.response?.status
+
+        if (code === 401 || code === 419) {
+          this.user = null         // 未ログイン状態
+          this.ready = true        // ← これ重要：未ログインでも認証状態は「確定」
           return null
         }
+
+        // 予期しないエラーは throw
+        this.ready = true
         throw e
-      } finally {
-        this.fetchedOnce = true
       }
     },
 
     /* ============================================================
-     * 2. ログイン（CSRF → /login POST → fetchUser）
+     * 3. waitUntilReady（認証状態の確定を必ず待つ）
      * ------------------------------------------------------------
-     * Breeze は redirect を返すため、XMLHttpRequest を明示
+     * ・WeeklyBoard / TodayTab / Router Guard で使用
+     * ・ready==true になるまで待機する
+     * ============================================================ */
+    async waitUntilReady() {
+      if (this.ready) return
+
+      await new Promise((resolve) => {
+        const unwatch = this.$watch(
+          () => this.ready,
+          (v) => {
+            if (v) {
+              unwatch()
+              resolve()
+            }
+          }
+        )
+      })
+    },
+
+    /* ============================================================
+     * 4. login
+     * ------------------------------------------------------------
+     * ・CSRF 初期化 → /login → fetchUser
      * ============================================================ */
     async login(credentials) {
       await axios.get('/sanctum/csrf-cookie')
@@ -47,11 +96,14 @@ export const useAuthStore = defineStore('auth', {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
       })
 
+      // 認証確定させる
       return await this.fetchUser()
     },
 
     /* ============================================================
-     * 3. ログアウト
+     * 5. logout
+     * ------------------------------------------------------------
+     * ・ログアウト成功後は user=null, ready=true
      * ============================================================ */
     async logout() {
       await axios.post('/logout', {}, {
@@ -59,7 +111,7 @@ export const useAuthStore = defineStore('auth', {
       })
 
       this.user = null
-      this.fetchedOnce = true
+      this.ready = true
     },
   },
 })

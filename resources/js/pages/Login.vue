@@ -44,7 +44,6 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { login } from '@/features/auth/api'
 import { useAuthStore } from '@/stores/auth'
 
 const email = ref('')
@@ -67,22 +66,20 @@ async function onSubmit() {
   error.value = ''
 
   try {
-    // ✔ 新しい Sanctum 用 API を直接呼ぶ
-    const user = await login({
+    // Sanctum login → /api/user の本物フロー
+    const user = await auth.login({
       email: email.value,
       password: password.value,
     })
-
-    // Vuex に反映されていなければ手動セット
-    auth.user = user
 
     if (user && user.id) {
       return router.replace(resolveRedirect())
     } else {
       error.value = 'ログインに失敗しました'
     }
-  } catch {
+  } catch (e) {
     error.value = 'ログインに失敗しました'
+    console.error('[Login]', e)
   } finally {
     loading.value = false
   }

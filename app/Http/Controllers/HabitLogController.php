@@ -11,96 +11,81 @@ use App\Models\HabitLog;
 class HabitLogController extends Controller
 {
     /**
-     * チェック/解除・自己評価（当日1行運用）
-     * 入力: habit_id, date(YYYY-MM-DD), value(bool), rating(int)
-     * value 省略時はトグル、rating は自己評価型のときのみ使用
+     * POST /api/habit-logs/toggle
+     *
+     * フロント仕様に完全同期した toggle 処理。
+     * - simple/self どちらも返す status は 'done' or 'none' の二値のみ
+     * - self は rating>=4 を done として扱う
      */
     public function toggle(Request $request)
     {
         $userId  = Auth::id();
         $habitId = (int)$request->input('habit_id');
         $dateIso = (string)$request->input('date');
-        $slot    = (int)($request->input('time_slot') ?? 0); // 0=終日
+        $slot    = (int)($request->input('time_slot') ?? 0);
 
-        // “checked” 等の別名は不許可
         if ($request->has('checked')) {
-            abort(422, 'パラメータ checked は廃止しました。value を使用してください。');
+            abort(422, 'parameter "checked" is deprecated. use value instead.');
         }
 
-        // value は true/false/null（null=トグル）
+        // value → true/false/null（null = front toggle）
         $valueParam = $request->has('value')
             ? filter_var($request->input('value'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE)
             : null;
 
-        // rating（自己評価型用: 0〜4）
+        // rating（self のときのみ使用, 0〜4）
         $ratingParam = $request->input('rating', null);
         $ratingVal   = is_numeric($ratingParam) ? (int)$ratingParam : null;
 
-        // 日付バリデーション
+        // ---- date ----
         $date = Carbon::parse($dateIso)->startOfDay();
-        abort_if($date->gt(Carbon::today()), 422, '未来日は記録できません。');
+        abort_if($date->gt(Carbon::today()), 422, 'Future dates are not allowed.');
 
-        // 習慣取得＋予定判定
+        // ---- habit ----
         $habit = Habit::where('user_id', $userId)->findOrFail($habitId);
-        abort_unless($habit->isScheduledFor($date, $slot), 422, '予定日ではありません。');
+        abort_unless($habit->isScheduledFor($date, $slot), 422, 'Not scheduled on this date.');
 
-        // 既存行の取得
+        // ---- existing row ----
         $row = HabitLog::where('user_id', $userId)
             ->where('habit_id', $habitId)
             ->whereDate('date', $date->toDateString())
             ->where('time_slot', $slot)
             ->first();
 
-        // 現在の状態
-        $current = $row?->status ?? 'none';
-        $desired = is_null($valueParam) ? ($current !== 'done') : (bool)$valueParam;
+        $currentStatus = $row?->status ?? 'none';
 
-        // === 判定ロジック ===
-        $statusStr   = 'none';
-        $finalRating = $ratingVal ?? $row?->rating ?? 0;
-        $checkedAt   = null;
+        // === front の「action」に同期 ===
+        // front では:
+        // - simple: toggle or forced rating>=4?
+        // - self: rating>=4 → done、rating=0 → none
+        // desired を front とロジック合わせる
+        $desired = is_null($valueParam)
+            ? ($currentStatus !== 'done')
+            : (bool)$valueParam;
+
+        $finalRating = $row?->rating ?? 0;
+        $finalStatus = 'none';
+        $checkedAt   = now();
 
         if ($habit->evaluation_type === 'simple') {
-            // 単純評価型
-            $statusStr   = $desired ? 'done' : 'none';
+            // simple → done/none のみ
+            $finalStatus = $desired ? 'done' : 'none';
             $finalRating = 0;
-            $checkedAt   = now();
 
         } elseif ($habit->evaluation_type === 'self') {
-            // 自己評価型
+            // self → rating あれば優先
             if ($ratingVal !== null) {
-                // rating が送られてきた場合
-                $finalRating = $ratingVal;
-                $checkedAt   = now();
-
-                if ($ratingVal >= 4) {
-                    $statusStr = 'done';
-                } elseif ($ratingVal >= 1) {
-                    $statusStr = 'inprogress';
-                } else {
-                    $statusStr = 'none';
-                }
-
-            } else {
-                // rating が送られてこなかった場合 → 直前の rating を維持して status 再判定
-                $finalRating = $row?->rating ?? 0;
-
-                if ($finalRating >= 4) {
-                    $statusStr = 'done';
-                } elseif ($finalRating >= 1) {
-                    $statusStr = 'inprogress';
-                } else {
-                    $statusStr = 'none';
-                }
-
-                $checkedAt = now();
+                $finalRating = max(0, min(4, $ratingVal));
             }
 
+            // done/none 二値に統一（front の normalizeDone と合わせる）
+            $finalStatus = ($finalRating >= 4) ? 'done' : 'none';
+
         } else {
-            abort(422, '不明な評価タイプ: '.$habit->evaluation_type);
+            abort(422, 'Unknown evaluation_type: ' . $habit->evaluation_type);
         }
 
-        // === upsert ===
+        // --- upsert ---
         $log = HabitLog::updateOrCreate(
             [
                 'user_id'   => $userId,
@@ -109,7 +94,7 @@ class HabitLogController extends Controller
                 'time_slot' => $slot,
             ],
             [
-                'status'     => $statusStr,
+                'status'     => $finalStatus,
                 'rating'     => $finalRating,
                 'checked_at' => $checkedAt,
             ]
@@ -120,27 +105,54 @@ class HabitLogController extends Controller
         return response()->json([
             'ok'         => true,
             'status'     => $log->status,             // "done" / "none"
-            'value'      => $log->status === 'done',  // true / false
+            'value'      => $log->status === 'done',  // true/false
             'rating'     => $log->rating,
             'checked_at' => optional($log->checked_at)->toDateTimeString(),
             'date'       => $date->toDateString(),
-            'id'         => $habitId,
+            'habit_id'   => $habitId,
             'time_slot'  => $slot,
         ]);
     }
 
+
+    /**
+     * GET /api/habit-logs?start=YYYY-MM-DD&end=YYYY-MM-DD
+     *
+     * WeekTab の loadLogs() のための区間ログ一覧。
+     * StatsController::logs() と返却形式を完全統一。
+     */
     public function index(Request $request)
     {
+        $userId = Auth::id();
         $start = $request->query('start');
         $end   = $request->query('end');
 
-        $logs = HabitLog::where('user_id', auth::id())
+        $logs = HabitLog::where('user_id', $userId)
             ->whereBetween('date', [$start, $end])
-            ->get();
+            ->get([
+                'habit_id',
+                'date',
+                'time_slot',
+                'status',
+                'rating',
+                'checked_at',
+            ])
+            ->map(function (HabitLog $l) {
+                return [
+                    'habit_id'   => (int) $l->habit_id,
+                    'date'       => Carbon::parse($l->date)->toDateString(),
+                    'time_slot'  => (int) $l->time_slot,
+                    'status'     => $l->status,
+                    'rating'     => $l->rating,
+                    'checked_at' => optional($l->checked_at)->toDateTimeString(),
+                ];
+            })
+            ->values();
 
         return response()->json([
             'logs' => $logs,
+            'start' => $start,
+            'end'   => $end,
         ]);
     }
-
 }
