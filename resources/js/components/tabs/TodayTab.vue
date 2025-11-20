@@ -8,73 +8,151 @@ import TodayAnytimeSection from '@/components/today/TodayAnytimeSection.vue'
 import TodayNextSlotSection from '@/components/today/TodayNextSlotSection.vue'
 import TodayDoneSection from '@/components/today/TodayDoneSection.vue'
 
-import { onMounted } from 'vue'
+import { computed, onMounted, unref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useTodayState } from '@/composables/useTodayState'
+import { useWeeklyBoard } from '@/stores/useWeeklyBoard'
 import { useTodayTab } from '@/composables/useTodayTab'
 
-/* ---------------------------
- * 1. コアストア（唯一の useTodayState）
- * ------------------------- */
-const core = useTodayState()
-const auth = useAuthStore()
+/* ============================================================
+ * Stores
+ * ========================================================== */
+const core   = useTodayState()
+const auth   = useAuthStore()
+const weekly = useWeeklyBoard()
+const tab    = useTodayTab(core)
 
-// デバッグ用：今の core を見たいときに
+/* Debug */
 if (typeof window !== 'undefined') {
-  window.__today = core
+  window.__today    = core
+  window.__todayTab = tab
+  window.__weekly   = weekly
 }
 
-/* ---------------------------
- * 2. UIロジック（core を渡す）
- * ------------------------- */
-const {
-  ui,
-  loading,
-  habits,
-  plannedHabits,
-  resolvedTimeslot,
-  resolvedTimeslotLabel,
-  timeslotLabel,
-  topPick,
-  actionableOnly,
-  anytimeDisplay,
-  done,
-  nextSlotHabits,
-  nextSlot,
-  isFocused,
-  toggleFocus,
-  toggleCollapseDone,
-  getTodayLog,
-  onUpdate,
-  ymd,
-} = useTodayTab(core)
-
-/* ---------------------------
- * 3. 初期ロード（認証 → 初回 fetch）
- * ------------------------- */
+/* ============================================================
+ * Lifecycle
+ * ========================================================== */
 onMounted(async () => {
-  console.log('[Today] mounted')
+  console.log('[TodayTab] mounted')
 
   await auth.waitUntilReady()
-  console.log('[Today] auth.ready =', auth.ready)
+  if (!auth.isAuthenticated) return
 
-  if (!auth.isAuthenticated) {
-    console.warn('[Today] not authenticated → skip')
-    return
-  }
+  await weekly.fetchWeeklyBoard()
 
   if (!core.loaded.value) {
-    console.log('[Today] fetch triggered')
     await core.fetchToday()
-    console.log('[Today] fetch complete: loaded =', core.loaded.value)
   }
 })
 
-/* ---------------------------
- * 4. Row 更新
- * ------------------------- */
+/* ============================================================
+ * Helpers
+ * ========================================================== */
+const normalizeArray = (raw) => {
+  const v = unref(raw)
+  return Array.isArray(v) ? v : []
+}
+
+/* ============================================================
+ * Lists / Data mapping
+ * ========================================================== */
+
+// 進捗バー用
+const plannedHabits = computed(() => normalizeArray(tab.plannedHabits))
+
+// slot grouping
+const SLOT_LABEL = ['', '朝', '昼', '夕', '夜']
+
+const bySlot = computed(() => {
+  const g =
+    tab.bySlot ??
+    tab.lists?.bySlot?.value ??
+    { 0: [], 1: [], 2: [], 3: [], 4: [] }
+
+  return g
+})
+
+/* ★ 現在のタブ（朝 / 昼 / 夕 / 夜 / すべて）に応じて表示する slot を決める */
+const timeslotFilter = computed(() => {
+  const s = tab?.ui?.state ?? {}
+
+  return (
+    // どれかに入っている想定。なければ 'all'
+    s.timeslot ??
+    s.slot ??
+    s.currentSlot ??
+    (s.filter && (s.filter.timeslot ?? s.filter.slot)) ??
+    'all'
+  )
+})
+
+const visibleSlots = computed(() => {
+  const v = timeslotFilter.value
+
+  // すべて / 自動 → 全スロット
+  if (v === 'all' || v === 'auto' || v === 'auto_slot' || v == null) {
+    return [1, 2, 3, 4]
+  }
+
+  // 朝
+  if (
+    v === 'morning' ||
+    v === 'am' ||
+    v === '朝' ||
+    v === 1 ||
+    v === '1'
+  ) {
+    return [1]
+  }
+
+  // 昼
+  if (
+    v === 'noon' ||
+    v === 'day' ||
+    v === '昼' ||
+    v === 2 ||
+    v === '2'
+  ) {
+    return [2]
+  }
+
+  // 夕
+  if (
+    v === 'evening' ||
+    v === '夕' ||
+    v === 3 ||
+    v === '3'
+  ) {
+    return [3]
+  }
+
+  // 夜
+  if (
+    v === 'night' ||
+    v === 'pm' ||
+    v === '夜' ||
+    v === 4 ||
+    v === '4'
+  ) {
+    return [4]
+  }
+
+  // よく分からない値なら一旦全部出す
+  return [1, 2, 3, 4]
+})
+
+// その他のリスト
+const anytime        = computed(() => normalizeArray(tab.anytime))
+const nextSlot       = computed(() => unref(tab.nextSlot) ?? null)
+const nextSlotHabits = computed(() => normalizeArray(tab.nextSlotHabits))
+const done           = computed(() => normalizeArray(tab.done))
+
+/* ============================================================
+ * Events
+ * ========================================================== */
 function onRowUpdate(habit, payload = {}) {
-  onUpdate({
+  if (!habit) return
+  tab.onUpdate({
     id: habit.id,
     status: payload.status,
     value: payload.value,
@@ -83,74 +161,93 @@ function onRowUpdate(habit, payload = {}) {
 }
 
 function goDetail(id) {
-  try {
-    const href = `/habits/${id}`
-    if (window?.$router) window.$router.push(href)
-    else location.assign(href)
-  } catch {
-    location.assign(`/habits/${id}`)
+  const href = `/habits/${id}`
+  if (window?.$router) {
+    window.$router.push(href)
+  } else {
+    location.assign(href)
   }
 }
 </script>
 
 <template>
   <div class="p-4 md:p-6 space-y-6">
+    <!-- Header -->
     <header class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-semibold">今日</h1>
-        <p class="text-sm text-gray-500">
-          {{ ymd(new Date()) }}
-        </p>
+        <p class="text-sm text-gray-500">{{ tab.ymd(new Date()) }}</p>
       </div>
     </header>
 
+    <!-- Progress Bar -->
     <TodayProgress
       :habits="plannedHabits"
-      :get-today-log="getTodayLog"
-      :timeslot="resolvedTimeslot"
+      :get-today-log="tab.getTodayLog"
+      timeslot="all"
     />
 
     <TodayHeader />
 
+    <!-- Top Pick -->
     <TodayTopPickCard
-      v-if="resolvedTimeslot === 'all' && topPick"
-      :top-pick="topPick"
-      :timeslot-label="timeslotLabel"
+      v-if="tab.topPick && tab.topPick.h"
+      :top-pick="tab.topPick"
+      :timeslot-label="tab.timeslotLabel"
       :on-row-update="onRowUpdate"
     />
 
-    <div class="text-sm text-gray-600">
-      対象: {{ resolvedTimeslotLabel }} ／
-      完了{{ ui.state.filter.showCompleted ? '含む' : '隠す' }} ／
-      {{ ui.state.filter.limit === 1 ? '1件だけ' : '全件' }}
-    </div>
+    <!-- ===================================================== -->
+    <!-- 朝・昼・夕・夜ごとの「今やる候補」                     -->
+    <!--   → 朝タブなら朝だけ、夕タブなら夕だけ、              -->
+    <!--     すべてタブなら4つ全部表示                          -->
+    <!-- ===================================================== -->
+    <section
+      v-for="slot in visibleSlots"
+      :key="slot"
+      class="mt-6"
+    >
+      <h2 class="text-lg font-semibold mb-2">
+        {{ SLOT_LABEL[slot] }}の習慣
+      </h2>
 
-    <TodayActionableSection
-      :loading="loading"
-      :items="actionableOnly"
-      :is-focused="isFocused"
-      :toggle-focus="toggleFocus"
-      :go-detail="goDetail"
-      :on-row-update="onRowUpdate"
-    />
+      <TodayActionableSection
+        :items="bySlot[slot]"
+        :on-row-update="onRowUpdate"
+        :go-detail="goDetail"
+        :loading="false"
+        :is-focused="tab.isFocused"
+        :toggle-focus="tab.toggleFocus"
+      />
 
+      <div
+        v-if="bySlot[slot]?.length === 0"
+        class="text-sm text-gray-400 pl-1"
+      >
+        （{{ SLOT_LABEL[slot] }}の習慣なし）
+      </div>
+    </section>
+
+    <!-- いつでも -->
     <TodayAnytimeSection
-      :items="anytimeDisplay"
+      :items="anytime"
       :on-row-update="onRowUpdate"
     />
 
+    <!-- 次の時間帯 -->
     <TodayNextSlotSection
       :next-slot="nextSlot"
       :items="nextSlotHabits"
       :on-row-update="onRowUpdate"
     />
 
+    <!-- 完了 -->
     <TodayDoneSection
-      :show-completed="ui.state.filter.showCompleted"
-      :collapsed="ui.state.collapse.done"
+      :show-completed="tab.ui.state.filter.showCompleted"
+      :collapsed="tab.ui.state.collapse.done"
       :items="done"
       :on-row-update="onRowUpdate"
-      @toggle-collapse-done="toggleCollapseDone"
+      @toggle-collapse-done="tab.toggleCollapseDone"
     />
   </div>
 </template>

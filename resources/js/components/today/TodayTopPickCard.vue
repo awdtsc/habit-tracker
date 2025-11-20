@@ -1,16 +1,20 @@
 <!-- resources/js/components/today/TodayTopPickCard.vue -->
 <template>
-  <section class="rounded-2xl border p-4 bg-amber-50">
+  <section v-if="topPick && topPick.h" class="rounded-2xl border p-4 bg-amber-50">
     <div class="flex items-start justify-between gap-3">
       <div>
         <div class="text-xs font-semibold text-amber-700">いまのおすすめ</div>
+
+        <!-- 安全ガード付き -->
         <div class="text-lg font-semibold">
-          {{ topPick.h.title || topPick.h.name }}
+          {{ topPick.h?.title || topPick.h?.name || '' }}
         </div>
+
         <div class="text-xs text-gray-500">
-          スロット: {{ timeslotLabel(slotStr(topPick.h.time_slot)) }}
+          スロット: {{ slotLabel }}
         </div>
       </div>
+
       <div class="flex gap-2">
         <button
           class="px-3 py-1.5 text-sm rounded-md bg-blue-600 text-white"
@@ -18,6 +22,7 @@
         >
           完了にする
         </button>
+
         <button
           class="px-3 py-1.5 text-sm rounded-md border"
           @click="openRemindModal(topPick.h.id)"
@@ -34,10 +39,13 @@ import axios from '@/axios'
 
 const props = defineProps({
   topPick: { type: Object, required: true },
-  timeslotLabel: { type: Function, required: true },
+  timeslotLabel: { type: String, required: true },
   onRowUpdate: { type: Function, required: true },
 })
 
+const slotLabel = props.timeslotLabel
+
+// 時間帯を表示用文字列に変換
 const slotStr = (v) => {
   const n = Number(v || 0)
   if (n === 1) return 'morning'

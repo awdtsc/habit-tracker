@@ -1,66 +1,40 @@
 // resources/js/startup/auth-guards.js
 
-import { useAuthStore } from '@/stores/auth'
+// Pinia auth store を後で使う前提
+let authStoreRef = null
 
-const AUTH_EVENT = 'auth:unauthorized'
+export function injectAuthStore(auth) {
+  authStoreRef = auth
+}
 
+/**
+ * Router Guard（未ログイン → /login）
+ */
 export function setupAuthGuards(router) {
-  const auth = useAuthStore()
 
-  /* ============================================================
-   * ① axios が 401 を検知した時のハンドラ
-   * ------------------------------------------------------------
-   *  auth.isAuthenticated に代入しないこと！
-   * ============================================================ */
-  window.addEventListener(AUTH_EVENT, () => {
-    auth.user = null     // ← これだけでOK
-    router.push({ name: 'login' })
-  })
-
-  /* ============================================================
-   * ② ルーター前処理
-   * ------------------------------------------------------------
-   *  - public ページは素通り
-   *  - protected ページは未認証なら login
-   * ============================================================ */
   router.beforeEach(async (to, from, next) => {
-    const isPublic = to.meta?.public === true
 
-    // ---- 公開ページ（例: /login） ----
-    if (isPublic) {
-      if (to.name === 'login' && auth.isAuthenticated) {
-        return next({ name: 'Today' })
-      }
+    // login ページは常に許可
+    if (to.meta?.public) {
       return next()
     }
 
-    // ---- 認証が必要なページ ----
-    if (!auth.isAuthenticated) {
-      try {
-        const { fetchMeOnce } = await import('@/features/auth/api')
-        await fetchMeOnce()
-
-        // fetchMeOnce で user が復活したなら OK
-        if (auth.isAuthenticated) {
-          return next()
-        }
-        // 復活しなかった → login
-        return next({ name: 'login' })
-
-      } catch {
-        return next({ name: 'login' })
-      }
+    // authStore がまだ注入されていない → 一旦通す（app.js で後から確定する）
+    if (!authStoreRef) {
+      console.warn('[auth-guards] authStore 未準備 → 一旦 next()')
+      return next()
     }
 
+    // 認証状態の確定を待つ
+    await authStoreRef.waitUntilReady()
+
+    // 未ログイン → loginへ
+    if (!authStoreRef.isAuthenticated) {
+      console.warn('[auth-guards] 未ログイン → redirect /login')
+      return next({ name: 'login' })
+    }
+
+    // ログイン済み → 通過
     return next()
-  })
-
-  /* ============================================================
-   * ③ afterEach（タイトル設定）
-   * ============================================================ */
-  router.afterEach((to) => {
-    if (to.meta?.title) {
-      document.title = `Habit | ${to.meta.title}`
-    }
   })
 }

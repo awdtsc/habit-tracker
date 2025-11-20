@@ -10,7 +10,9 @@ import {
   recomputeRates,
 } from './useHabitBoardCore'
 
-/* ========= 操作世代＆保留管理 ========= */
+/* =========================================================
+ * 操作世代（op-seq）と pending 管理
+ * ======================================================= */
 const _opSeq = {}
 const nextOpId = (k) => (_opSeq[k] = (_opSeq[k] || 0) + 1)
 const isLatest = (k, id) => _opSeq[k] === id
@@ -22,7 +24,9 @@ const decPending = (k) => {
   if (_pendingByKey[k] <= 0) delete _pendingByKey[k]
 }
 
-/* ========= auth を安全に取るヘルパ ========= */
+/* =========================================================
+ * 安全な auth 取得
+ * ======================================================= */
 function safeAuth() {
   try {
     return useAuthStore()
@@ -31,13 +35,12 @@ function safeAuth() {
   }
 }
 
-/* ========= /api/weekly-board ========= */
+/* =========================================================
+ * /api/weekly-board
+ * ======================================================= */
 export async function fetchBoard({ silent = true } = {}) {
   const auth = safeAuth()
-  // 認証がまだ確定してない/未ログインなら叩かない
-  if (!auth?.fetchedOnce || !auth?.isAuthenticated) {
-    return
-  }
+  if (!auth?.isAuthenticated) return   // ← ★修正点: fetchedOnce 削除
 
   if (!silent) state.loading = true
 
@@ -49,33 +52,28 @@ export async function fetchBoard({ silent = true } = {}) {
       },
     })
 
-    // サーバーが week_start を返してくれたら、それを基準にする
+    // サーバーの week_start を優先
     if (data?.week_start) {
       state.start = startOfWeek(new Date(data.week_start))
     }
 
-    state.habits = (data?.habits ?? []).map((h) => {
-      const slotNum = toSlotNum(h.time_slot)
-      return { ...h, time_slot: slotNum }
-    })
+    // 習慣ロード
+    state.habits = (data?.habits ?? []).map((h) => ({
+      ...h,
+      time_slot: toSlotNum(h.time_slot),
+    }))
 
-    // 不要になったログを掃除
-    const validIds = new Set(state.habits.map((h) => h.id))
+    // 古い habit_id のログ掃除
+    const valid = new Set(state.habits.map((h) => h.id))
     for (const key of Object.keys(state.checks)) {
       const [habitId] = key.split('|')
-      if (!validIds.has(Number(habitId))) {
-        delete state.checks[key]
-      }
+      if (!valid.has(Number(habitId))) delete state.checks[key]
     }
 
     state.lastFetchedAt = Date.now()
-    // board を取れたときだけレート再計算
     recomputeRates()
   } catch (e) {
-    // 401 は静かに握る（認証タイミングのラグ対策）
-    if (e?.response?.status === 401) {
-      // noop
-    } else {
+    if (e?.response?.status !== 401) {
       console.error('[useHabitBoard] fetchBoard failed', e)
     }
   } finally {
@@ -83,12 +81,18 @@ export async function fetchBoard({ silent = true } = {}) {
   }
 }
 
-/* ========= /api/habit-logs/toggle ========= */
-export async function toggle(habitId, dateISO, action = 'toggle', slot = 0, rating = null) {
+/* =========================================================
+ * /api/habit-logs/toggle（差分返し版）
+ * ======================================================= */
+export async function toggle(
+  habitId,
+  dateISO,
+  action = 'toggle',
+  slot = 0,
+  rating = null
+) {
   const auth = safeAuth()
-  if (!auth?.isAuthenticated) {
-    throw new Error('not authenticated')
-  }
+  if (!auth?.isAuthenticated) throw new Error('not authenticated')
 
   const slotNum = toSlotNum(slot)
   const k = logKey(habitId, dateISO, slotNum)
@@ -97,11 +101,12 @@ export async function toggle(habitId, dateISO, action = 'toggle', slot = 0, rati
       status: 'none',
       rating: 0,
       updated_at: null,
-      done: false,
     }
+
   const opId = nextOpId(k)
   const h = state.habits.find((x) => x.id === habitId)
 
+  /* ---------- 1) 楽観的更新 ---------- */
   let next = {
     ...prev,
     habit_id: habitId,
@@ -112,7 +117,6 @@ export async function toggle(habitId, dateISO, action = 'toggle', slot = 0, rati
 
   if (action === 'rating') {
     next.rating = rating
-    // self 評価でも simple 評価でも、最終的な done 判定は getLog / normalizeDone に任せる
     next.status = rating >= 4 ? 'done' : 'none'
   } else {
     const wantDone = prev.status !== 'done'
@@ -122,11 +126,12 @@ export async function toggle(habitId, dateISO, action = 'toggle', slot = 0, rati
     }
   }
 
-  // done フラグは convenience なので、ここでは設定せず OK
+  // 即時ローカル反映
   state.checks = { ...state.checks, [k]: next }
   recomputeRates()
   incPending(k)
 
+  /* ---------- 2) API 反映 ---------- */
   try {
     const payload = {
       habit_id: habitId,
@@ -138,47 +143,46 @@ export async function toggle(habitId, dateISO, action = 'toggle', slot = 0, rati
     }
 
     const { data } = await axios.post('/api/habit-logs/toggle', payload)
-    if (!isLatest(k, opId)) return
 
-    const ratingVal = data?.rating ?? next.rating ?? 0
+    // 古い操作なら何もしない
+    if (!isLatest(k, opId)) return null
 
-    // self 評価のときは rating から done/none を決める
-    let finalStatus
-    if (h?.evaluation_type === 'self') {
-      finalStatus = ratingVal >= 4 ? 'done' : 'none'
-    } else {
-      finalStatus = data?.status === 'done' ? 'done' : 'none'
+    const ratingVal = data?.rating ?? next.rating
+    const finalStatus =
+      h?.evaluation_type === 'self'
+        ? ratingVal >= 4 ? 'done' : 'none'
+        : data?.status === 'done' ? 'done' : 'none'
+
+    const updated = {
+      habit_id: habitId,
+      date: dateISO,
+      time_slot: slotNum,
+      status: finalStatus,
+      rating: ratingVal,
+      updated_at: data?.updated_at ?? new Date().toISOString(),
     }
 
-    state.checks = {
-      ...state.checks,
-      [k]: {
-        habit_id: habitId,
-        date: dateISO,
-        time_slot: slotNum,
-        status: finalStatus,
-        rating: ratingVal,
-        updated_at: data?.updated_at ?? new Date().toISOString(),
-        // done は getLog() 側の normalizeDone で毎回再計算される
-      },
-    }
-
+    // サーバー確定反映
+    state.checks = { ...state.checks, [k]: updated }
     recomputeRates()
+
+    return updated
   } catch (e) {
-    // 401 などで失敗したら元に戻す
+    // revert
     state.checks = { ...state.checks, [k]: prev }
     recomputeRates()
+    return null
   } finally {
     decPending(k)
   }
 }
 
-/* ========= /api/habit-logs (範囲ロード) ========= */
+/* =========================================================
+ * /api/habit-logs （範囲ロード）
+ * ======================================================= */
 export async function loadLogs(startISO, endISO) {
   const auth = safeAuth()
-  if (!auth?.fetchedOnce || !auth?.isAuthenticated) {
-    return
-  }
+  if (!auth?.isAuthenticated) return   // ← ★修正点: fetchedOnce 削除
 
   try {
     const { data } = await axios.get('/api/habit-logs', {
@@ -193,13 +197,10 @@ export async function loadLogs(startISO, endISO) {
       const h = state.habits.find((x) => x.id === log.habit_id)
 
       const ratingVal = log.rating ?? 0
-      let status
-
-      if (h?.evaluation_type === 'self') {
-        status = ratingVal >= 4 ? 'done' : 'none'
-      } else {
-        status = log.status === 'done' ? 'done' : 'none'
-      }
+      const status =
+        h?.evaluation_type === 'self'
+          ? ratingVal >= 4 ? 'done' : 'none'
+          : log.status === 'done' ? 'done' : 'none'
 
       newChecks[key] = {
         habit_id: log.habit_id,
@@ -208,38 +209,28 @@ export async function loadLogs(startISO, endISO) {
         status,
         rating: ratingVal,
         updated_at: log.updated_at ?? null,
-        // done は getLog() で normalizeDone される
       }
     }
 
     state.checks = newChecks
     recomputeRates()
   } catch (e) {
-    if (e?.response?.status === 401) {
-      // 認証前などは静かに握る
-    } else {
+    if (e?.response?.status !== 401) {
       console.error('[useHabitBoard] loadLogs failed', e)
     }
   }
 }
 
-/* ========= auth イベントでの自動再取得 ========= */
-/**
- * ポイント：
- * - 「今週の開始日」は必ずサーバーの week_start を信じる
- * - そのために、reloadWeek では
- *    1) まず fetchBoard() を叩いて state.start（=week_start）をサーバーに合わせる
- *    2) その state.start〜+6日 を loadLogs() で埋める
- */
+/* =========================================================
+ * 認証イベントで週データ自動取得
+ * ======================================================= */
 export function setupHabitBoardAuthEvents() {
   if (typeof window === 'undefined') return
 
   const reloadWeek = async () => {
     try {
-      // 1) サーバー基準の week_start を取得
       await fetchBoard({ silent: true })
 
-      // 2) 取得した state.start を世界の中心として 1週間分のログを読む
       const startISO = isoLocal(state.start)
       const endISO = isoLocal(addDays(state.start, 6))
 
@@ -256,6 +247,5 @@ export function setupHabitBoardAuthEvents() {
     state.habits = []
     state.checks = {}
     state.rates = new Array(7).fill(0)
-    // 他に weekly-board 特有の state を持つようになったらここでリセット
   })
 }

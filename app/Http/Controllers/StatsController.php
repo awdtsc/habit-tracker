@@ -22,7 +22,7 @@ class StatsController extends Controller
             ? Carbon::parse($req->query('start'))->startOfDay()
             : Carbon::now()->startOfDay();
 
-        $w = $start->isoWeekday();   // 月=1 … 日=7
+        $w = $start->isoWeekday();
         if ($w !== 1) {
             $start->subDays($w - 1);
         }
@@ -78,7 +78,7 @@ class StatsController extends Controller
 
     /* ============================================================
      * GET /api/weekly-board
-     * Weekタブ・一括データ
+     * Weekタブ：一括ロード
      * ============================================================*/
     public function weeklyBoard(Request $req): JsonResponse
     {
@@ -86,18 +86,26 @@ class StatsController extends Controller
         [$start, $end] = $this->weekRange($req);
 
         /* -------------------------
-         * 1) 習慣一覧
+         * 1) 習慣一覧（完全版）
          * -------------------------*/
         $habits = Habit::where('user_id', $userId)
             ->get()
-            ->map(fn ($h) => [
-                'id'    => (int) $h->id,
-                'title' => $h->title,
-            ])
+            ->map(function (Habit $h) {
+                return [
+                    'id'              => (int) $h->id,
+                    'title'           => $h->title,
+                    'time_slot'       => (int) ($h->time_slot ?? 0),
+                    'start_date'      => optional($h->start_date)->toDateString(),
+                    'end_date'        => optional($h->end_date)->toDateString(),
+                    'frequency_type'  => $h->frequency_type,
+                    'days_of_week'    => $h->normalizedDaysOfWeek(),
+                    'evaluation_type' => $h->evaluation_type,
+                ];
+            })
             ->values();
 
         /* -------------------------
-         * 2) days[]
+         * 2) days[]（7日分）
          * -------------------------*/
         $today = Carbon::today();
 
@@ -114,7 +122,7 @@ class StatsController extends Controller
         })->values();
 
         /* -------------------------
-         * 3) checks[]
+         * 3) checks[]（全 HabitLog）
          * -------------------------*/
         $checks = HabitLog::where('user_id', $userId)
             ->whereBetween('date', [$start, $end])
@@ -151,16 +159,16 @@ class StatsController extends Controller
         }
 
         /* -------------------------
-         * 5) 週次達成率
+         * 5) Weekly rate
          * -------------------------*/
         [$list, $rates] = $this->computeWeeklyRates($req);
 
         /* -------------------------
-         * 6) rows（← これが今回追加）
+         * 6) rows（WeeklyBoard の本体）
          * -------------------------*/
         $rows = $habits->map(function ($habit) use ($days, $checks) {
 
-            // CheckMap: date → status
+            // habit_id 単位の check map を作る
             $checkMap = [];
             foreach ($checks as $c) {
                 if ($c['habit_id'] === $habit['id']) {
@@ -168,14 +176,13 @@ class StatsController extends Controller
                 }
             }
 
-            // cells = 7日分
             $cells = collect($days)->map(function ($d) use ($checkMap) {
                 $date = $d['iso'];
 
                 return [
                     'date'   => $date,
                     'status' => $checkMap[$date] ?? null,
-                    'isDone' => isset($checkMap[$date]) && $checkMap[$date] === 'done',
+                    'isDone' => ($checkMap[$date] ?? null) === 'done',
                 ];
             });
 
@@ -183,6 +190,11 @@ class StatsController extends Controller
                 'habit_id'    => $habit['id'],
                 'habit_title' => $habit['title'],
                 'cells'       => $cells,
+                'time_slot'   => $habit['time_slot'],             // ← 超重要
+                'days_of_week'=> $habit['days_of_week'],          // ← スケジュール判定用
+                'frequency_type'=> $habit['frequency_type'],
+                'start_date'  => $habit['start_date'],
+                'end_date'    => $habit['end_date'],
             ];
         })->values();
 
@@ -202,8 +214,7 @@ class StatsController extends Controller
             'week_start'        => $start->toDateString(),
             'week_end'          => $end->toDateString(),
 
-            // ← これが超重要！これで習慣名が表示される
-            'rows'              => $rows,
+            'rows'              => $rows,   // WeeklyBoard のメイン
         ]);
     }
 

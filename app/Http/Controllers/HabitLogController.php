@@ -11,35 +11,43 @@ use App\Models\HabitLog;
 class HabitLogController extends Controller
 {
     /**
-     * POST /api/habit-logs/toggle
-     *
-     * フロント仕様に完全同期した toggle 処理。
-     * - simple/self どちらも返す status は 'done' or 'none' の二値のみ
-     * - self は rating>=4 を done として扱う
+     * ============================================================
+     *  POST /api/habit-logs/toggle
+     *  フロント仕様に完全同期した toggle 処理
+     * ============================================================
      */
     public function toggle(Request $request)
     {
         $userId  = Auth::id();
-        $habitId = (int)$request->input('habit_id');
-        $dateIso = (string)$request->input('date');
-        $slot    = (int)($request->input('time_slot') ?? 0);
+        $habitId = (int) $request->input('habit_id');
+        $dateIso = (string) $request->input('date');
+        $slot    = (int) ($request->input('time_slot') ?? 0);
 
+        // legacy パラメータ禁止
         if ($request->has('checked')) {
-            abort(422, 'parameter "checked" is deprecated. use value instead.');
+            abort(422, 'parameter "checked" is deprecated. use `value` instead.');
         }
 
-        // value → true/false/null（null = front toggle）
+        // value(true/false/null=toggle)
         $valueParam = $request->has('value')
             ? filter_var($request->input('value'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE)
             : null;
 
-        // rating（self のときのみ使用, 0〜4）
+        // rating(self 用)
         $ratingParam = $request->input('rating', null);
-        $ratingVal   = is_numeric($ratingParam) ? (int)$ratingParam : null;
+        $ratingVal   = is_numeric($ratingParam) ? (int) $ratingParam : null;
 
         // ---- date ----
-        $date = Carbon::parse($dateIso)->startOfDay();
-        abort_if($date->gt(Carbon::today()), 422, 'Future dates are not allowed.');
+        try {
+            $date = Carbon::parse($dateIso)->startOfDay();
+        } catch (\Exception $e) {
+            abort(422, 'Invalid date format');
+        }
+
+        // 未来日は不可
+        if ($date->gt(Carbon::today())) {
+            abort(422, 'Future dates are not allowed.');
+        }
 
         // ---- habit ----
         $habit = Habit::where('user_id', $userId)->findOrFail($habitId);
@@ -48,24 +56,21 @@ class HabitLogController extends Controller
         // ---- existing row ----
         $row = HabitLog::where('user_id', $userId)
             ->where('habit_id', $habitId)
-            ->whereDate('date', $date->toDateString())
+            ->where('date', $date->toDateString())
             ->where('time_slot', $slot)
             ->first();
 
         $currentStatus = $row?->status ?? 'none';
 
-        // === front の「action」に同期 ===
-        // front では:
-        // - simple: toggle or forced rating>=4?
-        // - self: rating>=4 → done、rating=0 → none
-        // desired を front とロジック合わせる
+        // ============================================================
+        //  フロント仕様：desired（最終的に done/none にしたいか）
+        // ============================================================
         $desired = is_null($valueParam)
-            ? ($currentStatus !== 'done')
-            : (bool)$valueParam;
+            ? ($currentStatus !== 'done') // toggle
+            : (bool) $valueParam;
 
         $finalRating = $row?->rating ?? 0;
         $finalStatus = 'none';
-        $checkedAt   = now();
 
         if ($habit->evaluation_type === 'simple') {
             // simple → done/none のみ
@@ -73,19 +78,19 @@ class HabitLogController extends Controller
             $finalRating = 0;
 
         } elseif ($habit->evaluation_type === 'self') {
-            // self → rating あれば優先
+            // self → rating >= 4 = done
             if ($ratingVal !== null) {
                 $finalRating = max(0, min(4, $ratingVal));
             }
-
-            // done/none 二値に統一（front の normalizeDone と合わせる）
             $finalStatus = ($finalRating >= 4) ? 'done' : 'none';
 
         } else {
             abort(422, 'Unknown evaluation_type: ' . $habit->evaluation_type);
         }
 
-        // --- upsert ---
+        // ============================================================
+        //  Upsert
+        // ============================================================
         $log = HabitLog::updateOrCreate(
             [
                 'user_id'   => $userId,
@@ -96,7 +101,7 @@ class HabitLogController extends Controller
             [
                 'status'     => $finalStatus,
                 'rating'     => $finalRating,
-                'checked_at' => $checkedAt,
+                'checked_at' => now(),
             ]
         );
 
@@ -104,55 +109,64 @@ class HabitLogController extends Controller
 
         return response()->json([
             'ok'         => true,
-            'status'     => $log->status,             // "done" / "none"
-            'value'      => $log->status === 'done',  // true/false
-            'rating'     => $log->rating,
-            'checked_at' => optional($log->checked_at)->toDateTimeString(),
-            'date'       => $date->toDateString(),
             'habit_id'   => $habitId,
+            'date'       => $date->toDateString(),
             'time_slot'  => $slot,
+            'status'     => $log->status,
+            'value'      => $log->status === 'done',
+            'rating'     => $log->rating,
+            'updated_at' => optional($log->checked_at)->toDateTimeString(),
         ]);
     }
 
 
+
     /**
-     * GET /api/habit-logs?start=YYYY-MM-DD&end=YYYY-MM-DD
-     *
-     * WeekTab の loadLogs() のための区間ログ一覧。
-     * StatsController::logs() と返却形式を完全統一。
+     * ============================================================
+     *  GET /api/habit-logs?start=YYYY-MM-DD&end=YYYY-MM-DD
+     *  WeeklyBoard / Today の共通ログロード
+     * ============================================================
      */
     public function index(Request $request)
     {
         $userId = Auth::id();
-        $start = $request->query('start');
-        $end   = $request->query('end');
+        $start  = $request->query('start');
+        $end    = $request->query('end');
 
-        $logs = HabitLog::where('user_id', $userId)
-            ->whereBetween('date', [$start, $end])
-            ->get([
-                'habit_id',
-                'date',
-                'time_slot',
-                'status',
-                'rating',
-                'checked_at',
-            ])
-            ->map(function (HabitLog $l) {
-                return [
-                    'habit_id'   => (int) $l->habit_id,
-                    'date'       => Carbon::parse($l->date)->toDateString(),
-                    'time_slot'  => (int) $l->time_slot,
-                    'status'     => $l->status,
-                    'rating'     => $l->rating,
-                    'checked_at' => optional($l->checked_at)->toDateTimeString(),
-                ];
-            })
-            ->values();
+        if (!$start || !$end) {
+            return response()->json([
+                'error' => 'start and end are required',
+            ], 422);
+        }
+
+        try {
+            $s = Carbon::parse($start)->startOfDay();
+            $e = Carbon::parse($end)->endOfDay();
+        } catch (\Exception $e) {
+            abort(422, 'Invalid start or end date.');
+        }
+
+        $rows = HabitLog::where('user_id', $userId)
+            ->whereBetween('date', [$s->toDateString(), $e->toDateString()])
+            ->orderBy('date')
+            ->orderBy('time_slot')
+            ->get();
+
+        $logs = $rows->map(function (HabitLog $l) {
+            return [
+                'habit_id'   => (int) $l->habit_id,
+                'date'       => Carbon::parse($l->date)->toDateString(),
+                'time_slot'  => (int) $l->time_slot,
+                'status'     => $l->status,
+                'rating'     => (int) $l->rating,
+                'checked_at' => optional($l->checked_at)->toDateTimeString(),
+            ];
+        })->values();
 
         return response()->json([
-            'logs' => $logs,
-            'start' => $start,
-            'end'   => $end,
+            'logs'  => $logs,
+            'start' => $s->toDateString(),
+            'end'   => $e->toDateString(),
         ]);
     }
 }

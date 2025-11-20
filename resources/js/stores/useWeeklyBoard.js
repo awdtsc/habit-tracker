@@ -1,135 +1,166 @@
 // resources/js/stores/useWeeklyBoard.js
 import { reactive } from 'vue'
-import axios from '@/axios'   // ← 他と同じ共通 axios を使う
+import axios from '@/bootstrap'
 
-/**
- * WeeklyBoard のグローバル状態
- * /api/weekly-board のレスポンス構造に完全準拠
- *
- * ※ TodayTab の useHabitBoard とは絶対に混ざらないよう、
- *    checks は weeklyChecks として完全分離する。
- */
+/* ========================================
+ * Utility
+ * =======================================*/
+function todayISO() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/* ========================================
+ * State
+ * =======================================*/
 const state = reactive({
-  days: [],               // [{ iso, label, d, isToday, isFuture }]
-  habits: [],             // [{ id, title, ... }]
-  weeklyChecks: [],       // WeeklyBoard 専用 HabitLog 配列
-  scheduled_by_date: {},  // { 'YYYY-MM-DD': [habitId, habitId...] }
-  rates: [],              // [0,50,100...]
+  days: [],
+  habits: [],
+  scheduled_by_date: {},
+
+  weeklyChecks: [],
+
+  rates: [],
+
   range_label: '',
   week_start: null,
   week_end: null,
 
-  // 追加: 週ボードの初回ロードフラグ
   loaded: false,
 })
 
-/**
- * ================================
- *   週次データを取得
- * ================================
- */
+/* ========================================
+ * Weekly Board Fetch
+ * =======================================*/
 async function fetchWeeklyBoard(startISO = null) {
-  console.log('[WeeklyBoard] fetch called:', startISO)
+  // null → 今日に補完
+  const target = startISO ?? todayISO()
 
-  const params = startISO ? { start: startISO } : {}
+  console.log('[WeeklyBoard] fetchWeeklyBoard →', target)
 
   try {
-    const res = await axios.get('/api/weekly-board', { params })
-    console.log('[WeeklyBoard] response:', res.data)
+    const res = await axios.get('/api/weekly-board', {
+      params: { start: target }
+    })
 
     const data = res.data || {}
+    console.log('[WeeklyBoard] response:', data)
 
-    state.days = data.days ?? []
-    state.habits = data.habits ?? []
+    /* ---- days ---- */
+    state.days = Array.isArray(data.days) ? data.days : []
+
+    /* ---- habits (slot number 化) ---- */
+    state.habits = (data.habits ?? []).map(h => ({
+      ...h,
+      id: Number(h.id),
+      time_slot: Number(h.time_slot ?? 0),
+    }))
+
+    /* ---- scheduled_by_date ---- */
     state.scheduled_by_date = data.scheduled_by_date ?? {}
 
-    // ★ Today 用 HabitBoard とは絶対に共有しない
-    state.weeklyChecks = data.checks ?? []
+    /* ---- weeklyChecks ---- */
+    state.weeklyChecks = (data.checks ?? []).map(l => ({
+      habit_id: Number(l.habit_id),
+      date: l.date,
+      time_slot: Number(l.time_slot ?? 0),
+      status: l.status,
+      rating: Number(l.rating ?? 0),
+      checked_at: l.checked_at ?? null,
+    }))
 
+    /* ---- chart ---- */
     state.rates = data.rates ?? []
+
+    /* ---- range info ---- */
     state.range_label = data.range_label ?? ''
-    state.week_start = data.week_start ?? null
+    state.week_start = data.week_start ?? target
     state.week_end = data.week_end ?? null
 
-    state.loaded = true   // ← 初回ロード完了
-
+    state.loaded = true
   } catch (err) {
     console.error('[WeeklyBoard] ERROR fetchWeeklyBoard:', err)
   }
 }
 
-/**
- * ================================
- *   この日付にその習慣が予定されているか
- * ================================
- */
+/* ========================================
+ * isPlanned
+ * =======================================*/
 function isPlanned(habitId, dateISO) {
   const arr = state.scheduled_by_date?.[dateISO]
-  return Array.isArray(arr) && arr.includes(habitId)
+  return Array.isArray(arr) && arr.includes(Number(habitId))
 }
 
-/**
- * ================================
- *   セルのステータス取得
- *   - null      → 予定なし
- *   - 'pending' → 予定あり・未完了
- *   - 'done'    → 完了
- * ================================
- */
+/* ========================================
+ * getStatus
+ * =======================================*/
 function getStatus(habitId, dateISO) {
   if (!isPlanned(habitId, dateISO)) return null
 
+  const hId = Number(habitId)
+
   const log = state.weeklyChecks.find(
-    (l) => l.habit_id === habitId && l.date === dateISO
+    l => l.habit_id === hId && l.date === dateISO
   )
 
-  if (log && log.status === 'done') return 'done'
-  return 'pending'
+  if (!log) return 'pending'
+  return log.status === 'done' ? 'done' : 'pending'
 }
 
-/**
- * ================================
- *   トグル（チェック／解除）
- * ================================
- */
-async function toggle(habitId, dateISO) {
-  console.log('[WeeklyBoard] toggle:', habitId, dateISO)
+/* ========================================
+ * toggle
+ * =======================================*/
+async function toggle(habitId, dateISO, slot = 0) {
+  console.log('[WeeklyBoard] toggle:', habitId, dateISO, slot)
 
   try {
     const res = await axios.post('/api/habit-logs/toggle', {
       habit_id: habitId,
       date: dateISO,
+      time_slot: slot,
     })
 
-    const updatedLog = res.data?.log
-    if (!updatedLog) return
+    const raw = res.data
+    if (!raw) return
 
-    // 既存ログの置換 or 新規追加
+    const normalized = {
+      habit_id: Number(raw.habit_id ?? habitId),
+      date: raw.date ?? dateISO,
+      time_slot: Number(raw.time_slot ?? slot),
+      status: raw.status ?? (raw.value ? 'done' : 'none'),
+      rating: Number(raw.rating ?? 0),
+      checked_at: raw.checked_at ?? null,
+    }
+
+    // existing replace
     const idx = state.weeklyChecks.findIndex(
-      (l) => l.habit_id === habitId && l.date === dateISO
+      l =>
+        l.habit_id === normalized.habit_id &&
+        l.date === normalized.date &&
+        l.time_slot === normalized.time_slot
     )
 
     if (idx >= 0) {
-      state.weeklyChecks[idx] = updatedLog
+      state.weeklyChecks.splice(idx, 1, normalized)
     } else {
-      state.weeklyChecks.push(updatedLog)
+      state.weeklyChecks.push(normalized)
     }
 
-    // 週達成率が返ってきたら更新
-    if (Array.isArray(res.data?.rates)) {
-      state.rates = res.data.rates
+    // chart
+    if (Array.isArray(raw.rates)) {
+      state.rates = raw.rates
     }
-
   } catch (err) {
     console.error('[WeeklyBoard] ERROR toggle:', err)
   }
 }
 
-/**
- * ================================
- *   export composable
- * ================================
- */
+/* ========================================
+ * export
+ * =======================================*/
 export function useWeeklyBoard() {
   return {
     state,

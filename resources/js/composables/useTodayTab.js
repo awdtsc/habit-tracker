@@ -1,63 +1,147 @@
 // resources/js/composables/useTodayTab.js
-import { createTodayLists, sortToday } from './useTodayLists'
 
-/**
- * Today タブ用 UI ロジック
- * - 引数 core には useTodayState() の戻り値を必ず渡す
- * - ここでは「派生リスト」と「UI 向けのまとめ」を作るだけ
- */
+import { computed, unref } from 'vue'
+import { createTodayLists } from './useTodayLists'
+import { useWeeklyBoard } from '@/stores/useWeeklyBoard'
+
+/** 安全に配列へ正規化 */
+const normalizeArray = (raw) => {
+  const v = unref(raw)
+  return Array.isArray(v) ? v : []
+}
+
 export function useTodayTab(core) {
   if (!core) {
-    throw new Error('[useTodayTab] core is required. Call useTodayState() and pass it in.')
+    throw new Error('[useTodayTab] core is required.')
   }
 
+  /* ============================================================
+   * WeeklyBoard（今日タブの唯一の習慣データ源）
+   * ========================================================== */
+  const weekly = useWeeklyBoard()
+
+  /* ============================================================
+   * createTodayLists
+   * ========================================================== */
   const lists = createTodayLists({
     ui: core.ui,
-    habits: core.habits,
-    board: core.board,
-    serverNow: core.serverNow,
+
+    // WeeklyBoard の習慣を今日タブの唯一のデータ源にする
+    habits: computed(() => normalizeArray(weekly.state.habits)),
+
+    // 今日ログ取得処理（WeeklyBoard checks 経由）
+    board: {
+      getLog(habitId, ymd, slot) {
+        const checks = weekly.state.checks ?? []
+        return (
+          checks.find(
+            (c) =>
+              c.habit_id === habitId &&
+              c.date === ymd &&
+              c.time_slot === slot
+          ) || null
+        )
+      },
+    },
+
     serverNowSlot: core.serverNowSlot,
-    apiTopPick: core.apiTopPick,
-    nowDateObj: core.nowDateObj,
     todayYmd: core.todayYmd,
-    ymd: core.ymd,
   })
 
+  /* ============================================================
+   * unwrap（Ref → 値）
+   * ========================================================== */
+  const plannedHabits   = computed(() => normalizeArray(lists.plannedHabits?.value))
+  const actionableOnly  = computed(() => normalizeArray(lists.actionableOnly?.value))
+  const actionable      = computed(() => normalizeArray(lists.actionable?.value))
+  const anytime         = computed(() => normalizeArray(lists.anytime?.value))
+  const anytimeDisplay  = computed(() => normalizeArray(lists.anytimeDisplay?.value))
+  const nextSlotHabits  = computed(() => normalizeArray(lists.nextSlotHabits?.value))
+  const nextSlot        = computed(() => unref(lists.nextSlot?.value) ?? null)
+  const done            = computed(() => normalizeArray(lists.done?.value))
+  const anyDone         = computed(() => done.value.length > 0)
+
+  /* ============================================================
+   * Slot grouping（重要）
+   * ========================================================== */
+  const bySlot = computed(() => {
+    const g = lists.bySlot?.value ?? lists.bySlot ?? null
+    return g ?? { 0: [], 1: [], 2: [], 3: [], 4: [] }
+  })
+
+  /* ============================================================
+   * Top Pick
+   * ========================================================== */
+  const topPick = computed(() => {
+    const source = actionableOnly.value.length
+      ? actionableOnly.value
+      : plannedHabits.value
+
+    if (!source.length) return null
+
+    return source
+      .map((item) => ({
+        ...item,
+        score: item.h?.priority ?? 0,
+      }))
+      .sort((a, b) => b.score - a.score)[0]
+  })
+
+  /* ============================================================
+   * Timeslot（現状固定 all）
+   * ========================================================== */
+  const resolvedTimeslot      = computed(() => 'all')
+  const resolvedTimeslotLabel = computed(() => '全件')
+
+  const timeslotLabel = computed(() => {
+    const raw = core.timeslotLabel?.value ?? ''
+    return typeof raw === 'string' ? raw : ''
+  })
+
+  /* ============================================================
+   * Export
+   * ========================================================== */
   return {
-    // --- 状態そのもの ---
     ui: core.ui,
     loading: core.loading,
     loaded: core.loaded,
-    habits: core.habits,
 
-    // --- 派生リスト ---
-    plannedHabits: lists.plannedHabits,
-    resolvedTimeslot: lists.resolvedTimeslot,
-    resolvedTimeslotLabel: lists.resolvedTimeslotLabel,
-    timeslotLabel: lists.timeslotLabel,
-    topPick: lists.topPick,
-    actionable: lists.actionable,
-    actionableOnly: lists.actionableOnly,
-    done: lists.done,
-    anytime: lists.anytime,
-    anytimeDisplay: lists.anytimeDisplay,
-    anyDone: lists.anyDone,
-    nextSlotHabits: lists.nextSlotHabits,
-    nextSlot: lists.nextSlot,
+    // 🔥 lists を必ず返す → 今日タブが参照できるようになる
+    lists,
 
-    // --- 操作 ---
+    /* 今日タブの習慣（WeeklyBoard のみ） */
+    habits: computed(() => normalizeArray(weekly.state.habits)),
+
+    /* リスト系 */
+    bySlot,
+    plannedHabits,
+    actionable,
+    actionableOnly,
+    anytime,
+    anytimeDisplay,
+    done,
+    anyDone,
+
+    nextSlotHabits,
+    nextSlot,
+
+    topPick,
+
+    resolvedTimeslot,
+    resolvedTimeslotLabel,
+    timeslotLabel,
+
+    /* 操作系 */
     onUpdate: core.onUpdate,
     getTodayLog: core.getTodayLog,
     isFocused: core.isFocused,
     toggleFocus: core.toggleFocus,
     toggleCollapseDone: core.toggleCollapseDone,
 
-    // --- 日付系 ---
+    /* Date tools */
     todayYmd: core.todayYmd,
     ymd: core.ymd,
   }
 }
 
-// 既存互換
-export { sortToday } from './useTodayLists'
 export default useTodayTab

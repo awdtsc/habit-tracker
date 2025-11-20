@@ -4,9 +4,10 @@ import axios from 'axios'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    user: null,          // ログイン中のユーザー
-    ready: false,        // ← 認証状態が「確定」しているか（最重要）
-    restoring: false,    // restore() の二重実行防止
+    user: null,        // ログイン中ユーザー
+    ready: false,      // 認証状態が確定したか
+    restoring: false,  // restore() の二重実行防止
+    fetchedOnce: false // ★追加：初回の fetchUser が成功したか
   }),
 
   getters: {
@@ -14,17 +15,12 @@ export const useAuthStore = defineStore('auth', {
   },
 
   actions: {
+
     /* ============================================================
-     * 1. restore（SPA 起動時に必ず1回だけ）
-     * ------------------------------------------------------------
-     * ・初回だけ fetchUser() を実行
-     * ・backend 起動直後の 401/419 は正常
-     * ・ready が true になるまで待つ
+     * 1. restore（SPA 起動時）
      * ============================================================ */
     async restore() {
-      if (this.restoring || this.ready) {
-        return this.user
-      }
+      if (this.restoring || this.ready) return this.user
 
       this.restoring = true
       try {
@@ -36,37 +32,43 @@ export const useAuthStore = defineStore('auth', {
     },
 
     /* ============================================================
-     * 2. fetchUser (/api/user)
-     * ------------------------------------------------------------
-     * ・401/419 は未ログインとして扱う（throw しない）
-     * ・fetch 後は必ず ready=true にする（重要）
+     * 2. fetchUser（/api/user）
      * ============================================================ */
     async fetchUser() {
       try {
         const res = await axios.get('/api/user')
         this.user = res.data
-        this.ready = true          // ← 認証状態が確定
+        this.ready = true
+        this.fetchedOnce = true   // ★追加：初回認証成功
+
+        // イベント発火（WeeklyBoard が反応する）
+        window.dispatchEvent(new CustomEvent('auth:ready'))
+        window.dispatchEvent(new CustomEvent('auth:logged-in'))
+
         return this.user
+
       } catch (e) {
         const code = e?.response?.status
 
         if (code === 401 || code === 419) {
-          this.user = null         // 未ログイン状態
-          this.ready = true        // ← これ重要：未ログインでも認証状態は「確定」
+          this.user = null
+          this.ready = true
+          this.fetchedOnce = true  // ★未ログインだとしても認証確定
+
+          // 401 の場合も ready として扱う
+          window.dispatchEvent(new CustomEvent('auth:ready'))
+
           return null
         }
 
-        // 予期しないエラーは throw
         this.ready = true
+        this.fetchedOnce = true
         throw e
       }
     },
 
     /* ============================================================
-     * 3. waitUntilReady（認証状態の確定を必ず待つ）
-     * ------------------------------------------------------------
-     * ・WeeklyBoard / TodayTab / Router Guard で使用
-     * ・ready==true になるまで待機する
+     * 3. waitUntilReady
      * ============================================================ */
     async waitUntilReady() {
       if (this.ready) return
@@ -85,9 +87,7 @@ export const useAuthStore = defineStore('auth', {
     },
 
     /* ============================================================
-     * 4. login
-     * ------------------------------------------------------------
-     * ・CSRF 初期化 → /login → fetchUser
+     * 4. login（CSRF → /login → fetchUser）
      * ============================================================ */
     async login(credentials) {
       await axios.get('/sanctum/csrf-cookie')
@@ -96,14 +96,11 @@ export const useAuthStore = defineStore('auth', {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
       })
 
-      // 認証確定させる
       return await this.fetchUser()
     },
 
     /* ============================================================
      * 5. logout
-     * ------------------------------------------------------------
-     * ・ログアウト成功後は user=null, ready=true
      * ============================================================ */
     async logout() {
       await axios.post('/logout', {}, {
@@ -112,6 +109,9 @@ export const useAuthStore = defineStore('auth', {
 
       this.user = null
       this.ready = true
+      this.fetchedOnce = true
+
+      window.dispatchEvent(new CustomEvent('auth:logged-out'))
     },
   },
 })
