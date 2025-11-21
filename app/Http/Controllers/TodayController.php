@@ -105,12 +105,17 @@ class TodayController extends Controller
         ];
 
         // フロントと同じ now_slot 判定
-        $h = (int)$now->format('H');
-        if ($h <= 4)       $nowSlot = 4;
-        elseif ($h <= 10) $nowSlot = 1;
-        elseif ($h <= 16) $nowSlot = 2;
-        elseif ($h <= 20) $nowSlot = 3;
-        else              $nowSlot = 4;
+        $hour = (int)$now->format('H');
+
+        if ($hour >= 5 && $hour <= 10) {
+            $nowSlot = 1;  // 朝
+        } elseif ($hour >= 11 && $hour <= 15) {
+            $nowSlot = 2;  // 昼
+        } elseif ($hour >= 16 && $hour <= 19) {
+            $nowSlot = 3;  // 夕
+        } else {
+            $nowSlot = 4;  // 夜
+        }
 
         return response()->json([
             'planned'  => $items,

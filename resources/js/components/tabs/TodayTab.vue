@@ -1,14 +1,15 @@
 <!-- resources/js/components/tabs/TodayTab.vue -->
 <script setup>
+import { computed, onMounted, unref } from 'vue'
+
 import TodayHeader from '@/components/today/TodayHeader.vue'
-import TodayProgress from '@/components/today/TodayProgress.vue'
 import TodayTopPickCard from '@/components/today/TodayTopPickCard.vue'
 import TodayActionableSection from '@/components/today/TodayActionableSection.vue'
 import TodayAnytimeSection from '@/components/today/TodayAnytimeSection.vue'
 import TodayNextSlotSection from '@/components/today/TodayNextSlotSection.vue'
+import TodayProgress from '@/components/today/TodayProgress.vue'
 import TodayDoneSection from '@/components/today/TodayDoneSection.vue'
 
-import { computed, onMounted, unref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useTodayState } from '@/composables/useTodayState'
 import { useWeeklyBoard } from '@/stores/useWeeklyBoard'
@@ -33,11 +34,15 @@ if (typeof window !== 'undefined') {
  * Lifecycle
  * ========================================================== */
 onMounted(async () => {
-  console.log('[TodayTab] mounted')
-
   await auth.waitUntilReady()
   if (!auth.isAuthenticated) return
 
+  // ✅ ログイン直後は必ず「自動」タブからスタートさせる
+  if (core.ui?.state?.filter) {
+    core.ui.state.filter.timeslot = 'auto'
+  }
+
+  // WeeklyBoard 自体は他タブで使うので、今日タブでも同期だけは取る
   await weekly.fetchWeeklyBoard()
 
   if (!core.loaded.value) {
@@ -53,95 +58,27 @@ const normalizeArray = (raw) => {
   return Array.isArray(v) ? v : []
 }
 
+const SLOT_LABEL = { 1: '朝', 2: '昼', 3: '夕', 4: '夜' }
+
+const activeSlotLabel = computed(() => {
+  const s = unref(tab.activeSlot)
+  return s == null ? 'すべて' : SLOT_LABEL[s] ?? '—'
+})
+
+/** 「次の時間帯」を表示するか？
+ *  - 自動タブ（timeslot === 'auto'）のときだけ表示
+ *  - 朝/昼/夕/夜/すべてタブでは出さない
+ */
+const showNextSlot = computed(() => {
+  const f = tab.ui?.state?.filter ?? {}
+  const v = f.timeslot ?? f.slot ?? 'auto'
+  return v === 'auto'
+})
+
 /* ============================================================
  * Lists / Data mapping
  * ========================================================== */
-
-// 進捗バー用
-const plannedHabits = computed(() => normalizeArray(tab.plannedHabits))
-
-// slot grouping
-const SLOT_LABEL = ['', '朝', '昼', '夕', '夜']
-
-const bySlot = computed(() => {
-  const g =
-    tab.bySlot ??
-    tab.lists?.bySlot?.value ??
-    { 0: [], 1: [], 2: [], 3: [], 4: [] }
-
-  return g
-})
-
-/* ★ 現在のタブ（朝 / 昼 / 夕 / 夜 / すべて）に応じて表示する slot を決める */
-const timeslotFilter = computed(() => {
-  const s = tab?.ui?.state ?? {}
-
-  return (
-    // どれかに入っている想定。なければ 'all'
-    s.timeslot ??
-    s.slot ??
-    s.currentSlot ??
-    (s.filter && (s.filter.timeslot ?? s.filter.slot)) ??
-    'all'
-  )
-})
-
-const visibleSlots = computed(() => {
-  const v = timeslotFilter.value
-
-  // すべて / 自動 → 全スロット
-  if (v === 'all' || v === 'auto' || v === 'auto_slot' || v == null) {
-    return [1, 2, 3, 4]
-  }
-
-  // 朝
-  if (
-    v === 'morning' ||
-    v === 'am' ||
-    v === '朝' ||
-    v === 1 ||
-    v === '1'
-  ) {
-    return [1]
-  }
-
-  // 昼
-  if (
-    v === 'noon' ||
-    v === 'day' ||
-    v === '昼' ||
-    v === 2 ||
-    v === '2'
-  ) {
-    return [2]
-  }
-
-  // 夕
-  if (
-    v === 'evening' ||
-    v === '夕' ||
-    v === 3 ||
-    v === '3'
-  ) {
-    return [3]
-  }
-
-  // 夜
-  if (
-    v === 'night' ||
-    v === 'pm' ||
-    v === '夜' ||
-    v === 4 ||
-    v === '4'
-  ) {
-    return [4]
-  }
-
-  // よく分からない値なら一旦全部出す
-  return [1, 2, 3, 4]
-})
-
-// その他のリスト
+const actionable     = computed(() => normalizeArray(tab.actionable))
 const anytime        = computed(() => normalizeArray(tab.anytime))
 const nextSlot       = computed(() => unref(tab.nextSlot) ?? null)
 const nextSlotHabits = computed(() => normalizeArray(tab.nextSlotHabits))
@@ -180,11 +117,10 @@ function goDetail(id) {
       </div>
     </header>
 
-    <!-- Progress Bar -->
+    <!-- Progress Bar（anytime を除外した値を渡す） -->
     <TodayProgress
-      :habits="plannedHabits"
-      :get-today-log="tab.getTodayLog"
-      timeslot="all"
+      v-if="tab.progress"
+      :progress="tab.progress"
     />
 
     <TodayHeader />
@@ -197,35 +133,20 @@ function goDetail(id) {
       :on-row-update="onRowUpdate"
     />
 
-    <!-- ===================================================== -->
-    <!-- 朝・昼・夕・夜ごとの「今やる候補」                     -->
-    <!--   → 朝タブなら朝だけ、夕タブなら夕だけ、              -->
-    <!--     すべてタブなら4つ全部表示                          -->
-    <!-- ===================================================== -->
-    <section
-      v-for="slot in visibleSlots"
-      :key="slot"
-      class="mt-6"
-    >
+    <!-- メインのアクションリスト（時間帯タブに応じてフィルタ済み） -->
+    <section class="mt-6">
       <h2 class="text-lg font-semibold mb-2">
-        {{ SLOT_LABEL[slot] }}の習慣
+        {{ activeSlotLabel }}の習慣
       </h2>
 
       <TodayActionableSection
-        :items="bySlot[slot]"
+        :items="actionable"
         :on-row-update="onRowUpdate"
         :go-detail="goDetail"
         :loading="false"
         :is-focused="tab.isFocused"
         :toggle-focus="tab.toggleFocus"
       />
-
-      <div
-        v-if="bySlot[slot]?.length === 0"
-        class="text-sm text-gray-400 pl-1"
-      >
-        （{{ SLOT_LABEL[slot] }}の習慣なし）
-      </div>
     </section>
 
     <!-- いつでも -->
@@ -234,14 +155,15 @@ function goDetail(id) {
       :on-row-update="onRowUpdate"
     />
 
-    <!-- 次の時間帯 -->
+    <!-- 次の時間帯（自動タブのときだけ） -->
     <TodayNextSlotSection
+      v-if="showNextSlot && nextSlot"
       :next-slot="nextSlot"
       :items="nextSlotHabits"
       :on-row-update="onRowUpdate"
     />
 
-    <!-- 完了 -->
+    <!-- 完了（時間帯 1..4 のみ） -->
     <TodayDoneSection
       :show-completed="tab.ui.state.filter.showCompleted"
       :collapsed="tab.ui.state.collapse.done"
