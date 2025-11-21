@@ -1,16 +1,14 @@
 // resources/js/composables/useTodayState.js
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import axios from '@/axios'
 
 import { useUiState } from '@/stores/uiState'
 import { useHabitBoard, logKey } from '@/stores/useHabitBoard'
 import { toSlotNum } from '@/domain/timeutil'
-
 import { todayYmd as _todayYmd, ymd as _ymd } from '@/domain/dates'
-import { initUiState, createFocusState } from './useTodayUi'
 
-// ★ 重要：これが抜けていた
-import { createTodayLists } from './useTodayLists'
+import { initUiState, createFocusState } from './useTodayUi'
+import { createTodayLists } from './useTodayLists'   // ★ Codex 中核
 
 export function useTodayState() {
   const ui    = useUiState()
@@ -18,6 +16,9 @@ export function useTodayState() {
 
   initUiState(ui)
 
+  /* ------------------------------------------------------------
+   * State
+   * ---------------------------------------------------------- */
   const loading       = ref(false)
   const loaded        = ref(false)
   const habits        = ref([])
@@ -27,6 +28,9 @@ export function useTodayState() {
   const serverNowSlot = ref(1)
   const apiTopPick    = ref(null)
 
+  /* ============================================================
+   * dates
+   * ========================================================== */
   const nowDateObj = computed(() =>
     serverNow.value ? new Date(serverNow.value) : new Date()
   )
@@ -38,9 +42,9 @@ export function useTodayState() {
 
   const focus = createFocusState(ui, serverDate)
 
-  /* ----------------------------------------------------
-   * ★ lists（TodayTab の中核データ）
-   * -------------------------------------------------- */
+  /* ============================================================
+   * TodayLists（TodayTab の全データソース）
+   * ========================================================== */
   const lists = createTodayLists({
     ui,
     habits,
@@ -50,11 +54,15 @@ export function useTodayState() {
     serverNowSlot,
   })
 
-  /* ----------------------------------------------------
-   * toggle 差分
-   * -------------------------------------------------- */
+  // ★ Codex 仕様（TodayTab から window.__today.items を参照するため）
+  const items = computed(() => lists.items?.value ?? lists.items ?? [])
+
+  /* ============================================================
+   * applyToggleDiff
+   * ========================================================== */
   function applyToggleDiff(diff) {
     if (!diff) return
+
     const {
       habit_id,
       date,
@@ -70,25 +78,20 @@ export function useTodayState() {
 
     board.state.checks[key] = {
       ...(board.state.checks[key] || {}),
-      status: status ?? board.state.checks[key]?.status ?? 'none',
-      rating: rating ?? board.state.checks[key]?.rating ?? 0,
+      status:     status ?? board.state.checks[key]?.status ?? 'none',
+      rating:     rating ?? board.state.checks[key]?.rating ?? 0,
       updated_at: updated_at ?? new Date().toISOString(),
       date,
       time_slot,
     }
 
-    if (top_pick !== undefined) {
-      apiTopPick.value = top_pick
-    }
-
-    if (today_rate !== undefined) {
-      ui.state.todayRate = today_rate
-    }
+    if (top_pick !== undefined) apiTopPick.value = top_pick
+    if (today_rate !== undefined) ui.state.todayRate = today_rate
   }
 
-  /* ----------------------------------------------------
-   * fetchToday
-   * -------------------------------------------------- */
+  /* ============================================================
+   * fetchToday（バックエンドから今日の全データを取る）
+   * ========================================================== */
   async function fetchToday() {
     if (loading.value) return
     loading.value = true
@@ -109,21 +112,30 @@ export function useTodayState() {
       const planned = Array.isArray(data?.planned) ? data.planned : []
       const todayStr = todayYmd()
 
-      habits.value = planned.map(it => {
-        const h  = it.h || {}
+      /* -------------------------------------------
+       * habits の整形（Codex 指定バージョン）
+       * ----------------------------------------- */
+      habits.value = planned.map(row => {
+        const h = row.h || {}
         const id = Number(h.id)
+
         return {
           ...h,
           id,
           time_slot: toSlotNum(h.time_slot ?? 0),
+          name: h.name ?? h.title ?? '',
           evaluation_type: h.evaluation ?? h.evaluation_type ?? 'simple',
+          pending_task: row.pending_task ?? null,
           focus: focus.isFocused(id),
         }
       })
 
-      for (const it of planned) {
-        const h   = it.h || {}
-        const log = it.today_log || null
+      /* -------------------------------------------
+       * board.log の初期化
+       * ----------------------------------------- */
+      for (const row of planned) {
+        const h   = row.h || {}
+        const log = row.today_log || null
         const hid = Number(h.id)
 
         const rawSlot = log?.time_slot ?? h.time_slot ?? 0
@@ -148,9 +160,9 @@ export function useTodayState() {
     }
   }
 
-  /* ----------------------------------------------------
-   * onUpdate
-   * -------------------------------------------------- */
+  /* ============================================================
+   * onUpdate（チェック or 評価の更新）
+   * ========================================================== */
   async function onUpdate(payload) {
     if (!payload || payload.id == null) return
 
@@ -161,6 +173,7 @@ export function useTodayState() {
     const slot    = h.time_slot ?? 0
     const dateISO = todayYmd()
 
+    /* rating 変更 */
     if (payload.rating !== undefined && payload.rating !== null) {
       try {
         const diff = await board.toggle(
@@ -177,6 +190,7 @@ export function useTodayState() {
       return
     }
 
+    /* toggle */
     const key  = logKey(hid, dateISO, slot)
     const prev = board.state.checks[key]
     board.state.checks[key] = { ...(prev || {}), __pending: true }
@@ -198,33 +212,39 @@ export function useTodayState() {
     }
   }
 
-  /* ----------------------------------------------------
+  /* ============================================================
    * getTodayLog
-   * -------------------------------------------------- */
+   * ========================================================== */
   function getTodayLog(id) {
     const h = habits.value.find(h => h.id === id)
     const slot = h ? h.time_slot : 0
     return board.getLog(id, todayYmd(), slot)
   }
 
+  /* ============================================================
+   * export
+   * ========================================================== */
   return {
     ui,
     board,
     loading,
     loaded,
     habits,
+
+    items,     // ★ Codex が TodayTab で参照する
+    lists,     // ★ useTodayLists の全データ
+
     serverTz,
     serverDate,
     serverNow,
     serverNowSlot,
     apiTopPick,
+
     nowDateObj,
     todayYmd,
     ymd,
 
     ...focus,
-
-    lists,   // ←←← ★これが最重要！
 
     fetchToday,
     onUpdate,

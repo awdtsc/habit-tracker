@@ -3,44 +3,85 @@ import { computed, unref } from 'vue'
 
 /**
  * TodayTab 用の統合ロジック
- * core は useTodayCore() の返り値
+ * core は useTodayState() の返り値
  */
 export function useTodayTab(core) {
   const lists = core.lists
 
-  const plannedHabits = computed(() => lists.plannedHabits?.value ?? [])
-  const actionable = computed(() => lists.actionable?.value ?? [])
-  const anytime = computed(() => lists.anytime?.value ?? [])
-  const done = computed(() => lists.done?.value ?? [])
+  /* ============================================================
+   * Slots / Lists マッピング
+   * ============================================================ */
 
-  const nextSlotHabits = computed(() => lists.nextSlotHabits?.value ?? [])
-  const nextSlot = computed(() => lists.nextSlot?.value ?? null)
+  // 今日やる予定の全習慣
+  const plannedHabits = computed(() =>
+    lists.plannedHabits?.value ?? []
+  )
 
-  const bySlot = computed(() => {
-    const g = lists.bySlot?.value
-    return g ?? { 0: [], 1: [], 2: [], 3: [], 4: [] }
-  })
+  // “すべてタブ” の未完了
+  const allActionable = computed(() =>
+    lists.allActionable?.value ?? []
+  )
+
+  // “すべてタブ” の完了
+  const allDone = computed(() =>
+    lists.allDone?.value ?? []
+  )
+
+  // “slotタブ（1〜4）” の未完了
+  const slotActionable = computed(() =>
+    lists.slotActionable?.value ?? []
+  )
+
+  // “slotタブ” の完了
+  const slotDone = computed(() =>
+    lists.slotDone?.value ?? []
+  )
+
+  // anytime（slotタブの時だけ）
+  const anytimeActionable = computed(() =>
+    lists.anytimeActionable?.value ?? []
+  )
+
+  const anytimeDone = computed(() =>
+    lists.anytimeDone?.value ?? []
+  )
+
+  // 次のスロット
+  const nextSlot = computed(() =>
+    lists.nextSlot?.value ?? null
+  )
+
+  const nextSlotHabits = computed(() =>
+    lists.nextSlotHabits?.value ?? []
+  )
 
   /* ============================================================
-   * Top Pick（アクション候補の最優先）
+   * bySlot（Weekly UI など共通用）
+   * ============================================================ */
+  const bySlot = computed(() =>
+    lists.plannedBySlot?.value ?? { 0: [], 1: [], 2: [], 3: [], 4: [] }
+  )
+
+  /* ============================================================
+   * Top Pick（未完了の中で最も優先度の高いもの）
    * ============================================================ */
   const topPick = computed(() => {
-    const source = actionable.value.filter((item) => {
-      const st = item.log?.status
-      const doneFlag = item.log?.done || st === 'done' || st === 1
-      return !doneFlag
-    })
+    const source = [
+      ...allActionable.value,
+      ...slotActionable.value,
+    ]
 
-    const fallback = actionable.value
-    const base = source.length ? source : fallback
-    if (!base.length) return null
-    return base[0]
+    if (!source.length) return null
+
+    return source[0] // computePriority 済のためソート済み
   })
 
   /* ============================================================
    * Timeslot ラベル
    * ============================================================ */
-  const activeSlot = computed(() => unref(lists.activeSlot))
+  const activeSlot = computed(() =>
+    unref(lists.activeSlot)
+  )
 
   const timeslotLabel = computed(() => {
     const s = activeSlot.value
@@ -51,7 +92,6 @@ export function useTodayTab(core) {
       3: '夕',
       4: '夜',
     }
-
     if (s == null) return 'すべて'
     return map[s] ?? '—'
   })
@@ -72,31 +112,32 @@ export function useTodayTab(core) {
     loaded: core.loaded,
 
     lists,
-
-    bySlot,
     plannedHabits,
-    actionable,
-    anytime,
-    done,
+    bySlot,
 
-    nextSlotHabits,
+    /* TodayTab.vue が使う一覧 */
+    allActionable,
+    allDone,
+    slotActionable,
+    slotDone,
+    anytimeActionable,
+    anytimeDone,
+
     nextSlot,
-
+    nextSlotHabits,
     topPick,
 
     activeSlot,
     timeslotLabel,
-
     progress,
 
-    /* 操作関数 */
+    /* 操作 */
     onUpdate: core.onUpdate,
     getTodayLog: core.getTodayLog,
     isFocused: core.isFocused,
     toggleFocus: core.toggleFocus,
     toggleCollapseDone: core.toggleCollapseDone,
 
-    /* 日付ツール */
     todayYmd: core.todayYmd,
     ymd: core.ymd,
   }

@@ -6,17 +6,15 @@ import { computePriority } from './usePriority'
 /* ============================================================
  * Slot 正規化
  * ========================================================== */
-function slotOf(h) {
-  const raw = h?.time_slot
+function slotOf(habit) {
+  const raw = habit?.time_slot
 
   if (typeof raw === 'number' && Number.isFinite(raw)) {
     return raw >= 0 && raw <= 4 ? raw : 0
   }
 
   const n = toSlotNum(raw)
-  if (typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 4) {
-    return n
-  }
+  if (typeof n === 'number' && n >= 0 && n <= 4) return n
 
   const map = {
     anytime: 0,
@@ -26,22 +24,17 @@ function slotOf(h) {
     night: 4,
     '0': 0, '1': 1, '2': 2, '3': 3, '4': 4,
   }
-
-  const key = String(raw ?? '').toLowerCase()
-  return map[key] ?? 0
+  return map[String(raw ?? '').toLowerCase()] ?? 0
 }
 
-/* ============================================================
- * Helpers
- * ========================================================== */
 function parseDaysOfWeek(raw) {
   if (!raw) return []
   if (Array.isArray(raw)) return raw.map(String)
 
   if (typeof raw === 'string') {
     try {
-      const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed)) return parsed.map(String)
+      const p = JSON.parse(raw)
+      if (Array.isArray(p)) return p.map(String)
     } catch {
       return raw.split(',').map(s => s.trim()).filter(Boolean)
     }
@@ -53,31 +46,31 @@ function weekdayKey(dateObj) {
   return ['sun','mon','tue','wed','thu','fri','sat'][dateObj.getDay()]
 }
 
-function isCompleted(h, log) {
+function isCompleted(_habit, log) {
   if (!log) return false
   if (log.done != null) return !!log.done
   if (log.status === 'done' || log.status === 1) return true
-  if (typeof log.status === 'string') return log.status.toLowerCase() === 'done'
+  if (typeof log.status === 'string')
+    return log.status.toLowerCase() === 'done'
   return false
 }
 
 /* ============================================================
- * Today Lists（完全最終仕様）
+ * Today Lists - FINAL（A 方式）
  * ========================================================== */
 export function createTodayLists({
   ui,
   habits,
   board,
   todayYmd,
-  serverNow,
   serverNowSlot,
 }) {
 
-  /* ----------------------- today date ----------------------- */
+  /* ----------------------- 今日 ----------------------- */
   const today = computed(() =>
     typeof todayYmd === 'function'
       ? todayYmd()
-      : unref(todayYmd) || ''
+      : (unref(todayYmd) || '')
   )
 
   const todayDate = computed(() => {
@@ -85,21 +78,20 @@ export function createTodayLists({
     return Number.isNaN(d.getTime()) ? new Date() : d
   })
 
-  /* ------------------ scheduled filter ------------------ */
-  function isScheduledToday(h) {
+  function isScheduledToday(habit) {
     const td = todayDate.value
 
-    if (h.start_date && td < new Date(h.start_date)) return false
-    if (h.end_date && td > new Date(h.end_date)) return false
+    if (habit.start_date && td < new Date(habit.start_date)) return false
+    if (habit.end_date && td > new Date(habit.end_date)) return false
 
-    const freq = h.frequency_type || 'daily'
+    const freq = habit.frequency_type || 'daily'
     if (freq === 'daily') return true
 
     if (freq === 'weekly') {
-      const days = parseDaysOfWeek(h.days_of_week)
-      const dowKey = weekdayKey(td)
-      return days.includes(dowKey)
+      const days = parseDaysOfWeek(habit.days_of_week)
+      return days.includes(weekdayKey(td))
     }
+
     return true
   }
 
@@ -119,25 +111,35 @@ export function createTodayLists({
     items.value.filter(x => isScheduledToday(x.h))
   )
 
-  /* ----------------------- filter state ----------------------- */
-  const filterState = computed(() =>
-    ui?.state?.filter ?? ui?.filter ?? {}
-  )
+  /* ============================================================
+   * ★ A 方式 activeSlot
+   * ========================================================== */
 
+  /**
+   * A 方式の定義：
+   *
+   * 初回：timeslot === "auto" → serverNowSlot（現在の時間帯）
+   * 以降：timeslot の値をそのまま使う（= 保存された最後のタブ）
+   * 
+   * Weekly → Today に戻っても自動で "auto" に戻さない
+   */
   const activeSlot = computed(() => {
-    const mode = filterState.value.timeslot ?? 'auto'
+    const filter = ui?.state?.filter
+    if (!filter) return null
 
+    const mode = filter.timeslot
+
+    // ① 初回アクセス = "auto"
     if (mode === 'auto') {
       const s = Number(unref(serverNowSlot))
       return Number.isFinite(s) ? s : null
     }
 
+    // ② 手動選択 = 記録された値
     if (mode === 'all') return null
 
-    const direct = Number(mode)
-    if (Number.isFinite(direct) && direct >= 0 && direct <= 4) {
-      return direct
-    }
+    const n = Number(mode)
+    if (Number.isFinite(n) && n >= 0 && n <= 4) return n
 
     const map = {
       anytime: 0, morning: 1, noon: 2, evening: 3, night: 4,
@@ -145,95 +147,63 @@ export function createTodayLists({
     return map[String(mode).toLowerCase()] ?? null
   })
 
-  /* --------------------- grouping --------------------- */
+  /* ----------------------- グルーピング ----------------------- */
   const plannedBySlot = computed(() => {
     const g = { 0:[],1:[],2:[],3:[],4:[] }
-    for (const x of plannedHabits.value) g[slotOf(x.h)].push(x)
+    for (const x of plannedHabits.value) {
+      g[slotOf(x.h)].push(x)
+    }
     return g
   })
 
-  /* ================================
-   * ここから最重要ロジック
-   * ================================ */
-
-  /* ----------------------------------------------------
-   * 1. すべてタブ（all）
-   * ---------------------------------------------------- */
   const allActionable = computed(() => {
     if (activeSlot.value !== null) return []
-
-    const list = plannedHabits.value
+    return plannedHabits.value
       .filter(x => !isCompleted(x.h, x.log))
-      .sort((a, b) =>
-        computePriority(b.h, {} ) -
-        computePriority(a.h, {} )
-      )
-    return list
+      .sort((a,b) => computePriority(b.h, {}) - computePriority(a.h, {}))
   })
 
   const allDone = computed(() => {
     if (activeSlot.value !== null) return []
-
-    return plannedHabits.value
-      .filter(x => isCompleted(x.h, x.log))
+    return plannedHabits.value.filter(x => isCompleted(x.h, x.log))
   })
 
-  /* ----------------------------------------------------
-   * 2. 個別タブ（slot = 1〜4）
-   * ---------------------------------------------------- */
   const slotActionable = computed(() => {
-    const slot = activeSlot.value
-    if (slot == null) return []
-
-    return plannedBySlot.value[slot]
-      .filter(x => !isCompleted(x.h, x.log))
-      .sort((a, b) =>
-        computePriority(b.h, {}) -
-        computePriority(a.h, {})
-      )
+    const s = activeSlot.value
+    if (s == null) return []
+    return plannedBySlot.value[s]
+      ?.filter(x => !isCompleted(x.h, x.log))
+      ?.sort((a,b) => computePriority(b.h,{}) - computePriority(a.h,{}))
+      ?? []
   })
 
   const slotDone = computed(() => {
-    const slot = activeSlot.value
-    if (slot == null) return []
-
-    return plannedBySlot.value[slot]
-      .filter(x => isCompleted(x.h, x.log))
+    const s = activeSlot.value
+    if (s == null) return []
+    return plannedBySlot.value[s]?.filter(x => isCompleted(x.h, x.log)) ?? []
   })
 
-  /* ----------------------------------------------------
-   * 3. anytime（0番）
-   * ---------------------------------------------------- */
   const anytimeActionable = computed(() => {
-    if (activeSlot.value == null) return [] // all のときは混ぜるので個別は出さない
-
+    if (activeSlot.value == null) return []
     return plannedBySlot.value[0]
       .filter(x => !isCompleted(x.h, x.log))
-      .sort((a, b) =>
-        computePriority(b.h, {}) -
-        computePriority(a.h, {})
-      )
+      .sort((a,b) => computePriority(b.h,{}) - computePriority(a.h,{}))
   })
 
   const anytimeDone = computed(() => {
     if (activeSlot.value == null) return []
-
-    return plannedBySlot.value[0]
-      .filter(x => isCompleted(x.h, x.log))
+    return plannedBySlot.value[0].filter(x => isCompleted(x.h, x.log))
   })
 
-  /* ----------------------------------------------------
-   * nextSlot（1ステップ）
-   * ---------------------------------------------------- */
   const nextSlot = computed(() => {
-    const base = Number(unref(serverNowSlot)) || 0
-    const next = base + 1
-    if (next > 4) return null
+    const cur = Number(unref(serverNowSlot))
+    const chain = { 1:2, 2:3, 3:4, 4:null }
+    const nxt = Number.isFinite(cur) ? chain[cur] ?? null : null
 
-    if (plannedBySlot.value[next]?.length) {
+    if (nxt && plannedBySlot.value[nxt]?.length) {
       return {
-        slot: next,
-        label: ['いつでも','朝','昼','夕','夜'][next],
+        slot: nxt,
+        label: ['いつでも','朝','昼','夕','夜'][nxt],
       }
     }
     return null
@@ -243,40 +213,27 @@ export function createTodayLists({
     nextSlot.value ? plannedBySlot.value[nextSlot.value.slot] : []
   )
 
-  /* ----------------------------------------------------
-   * progress（anytime を除外）
-   * ---------------------------------------------------- */
   const progress = computed(() => {
     const t = plannedHabits.value.filter(x => slotOf(x.h) !== 0)
-    const total = t.length
-    const completed = t.filter(x => isCompleted(x.h, x.log)).length
-    return { total, completed }
+    return {
+      total: t.length,
+      completed: t.filter(x => isCompleted(x.h, x.log)).length,
+    }
   })
 
-  /* ----------------------------------------------------
-   * export
-   * ---------------------------------------------------- */
   return {
+    items,
     activeSlot,
-
-    // all
+    plannedHabits,
+    plannedBySlot,
     allActionable,
     allDone,
-
-    // slot tabs
     slotActionable,
     slotDone,
-
-    // anytime lists
     anytimeActionable,
     anytimeDone,
-
-    // next slot
     nextSlot,
     nextSlotHabits,
-
     progress,
   }
 }
-
-export default createTodayLists

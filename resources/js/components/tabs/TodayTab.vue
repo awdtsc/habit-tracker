@@ -37,10 +37,6 @@ onMounted(async () => {
   await auth.waitUntilReady()
   if (!auth.isAuthenticated) return
 
-  if (core.ui?.state?.filter) {
-    core.ui.state.filter.timeslot = 'auto'
-  }
-
   await weekly.fetchWeeklyBoard()
 
   if (!core.loaded.value) {
