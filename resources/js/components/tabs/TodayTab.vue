@@ -37,12 +37,10 @@ onMounted(async () => {
   await auth.waitUntilReady()
   if (!auth.isAuthenticated) return
 
-  // ✅ ログイン直後は必ず「自動」タブからスタートさせる
   if (core.ui?.state?.filter) {
     core.ui.state.filter.timeslot = 'auto'
   }
 
-  // WeeklyBoard 自体は他タブで使うので、今日タブでも同期だけは取る
   await weekly.fetchWeeklyBoard()
 
   if (!core.loaded.value) {
@@ -53,7 +51,7 @@ onMounted(async () => {
 /* ============================================================
  * Helpers
  * ========================================================== */
-const normalizeArray = (raw) => {
+const normalize = (raw) => {
   const v = unref(raw)
   return Array.isArray(v) ? v : []
 }
@@ -65,24 +63,50 @@ const activeSlotLabel = computed(() => {
   return s == null ? 'すべて' : SLOT_LABEL[s] ?? '—'
 })
 
-/** 「次の時間帯」を表示するか？
- *  - 自動タブ（timeslot === 'auto'）のときだけ表示
- *  - 朝/昼/夕/夜/すべてタブでは出さない
- */
+/* 自動タブのときだけ表示 */
 const showNextSlot = computed(() => {
   const f = tab.ui?.state?.filter ?? {}
-  const v = f.timeslot ?? f.slot ?? 'auto'
+  const v = f.timeslot ?? 'auto'
   return v === 'auto'
 })
 
 /* ============================================================
  * Lists / Data mapping
  * ========================================================== */
-const actionable     = computed(() => normalizeArray(tab.actionable))
-const anytime        = computed(() => normalizeArray(tab.anytime))
-const nextSlot       = computed(() => unref(tab.nextSlot) ?? null)
-const nextSlotHabits = computed(() => normalizeArray(tab.nextSlotHabits))
-const done           = computed(() => normalizeArray(tab.done))
+const activeSlot = computed(() => unref(tab.activeSlot))
+
+/* ====== “すべて” タブ ====== */
+const isAll = computed(() => activeSlot.value == null)
+
+const allActionable = computed(() =>
+  isAll.value ? normalize(tab.allActionable) : []
+)
+
+const allDone = computed(() =>
+  isAll.value ? normalize(tab.allDone) : []
+)
+
+/* ====== slot タブ (1〜4) ====== */
+const slotActionable = computed(() =>
+  isAll.value ? [] : normalize(tab.slotActionable)
+)
+
+const slotDone = computed(() =>
+  isAll.value ? [] : normalize(tab.slotDone)
+)
+
+/* ====== anytime（slotタブのときだけ）====== */
+const anytimeActionable = computed(() =>
+  isAll.value ? [] : normalize(tab.anytimeActionable)
+)
+
+const anytimeDone = computed(() =>
+  isAll.value ? [] : normalize(tab.anytimeDone)
+)
+
+/* ====== Next Slot ====== */
+const nextSlot = computed(() => unref(tab.nextSlot) ?? null)
+const nextSlotHabits = computed(() => normalize(tab.nextSlotHabits))
 
 /* ============================================================
  * Events
@@ -117,11 +141,8 @@ function goDetail(id) {
       </div>
     </header>
 
-    <!-- Progress Bar（anytime を除外した値を渡す） -->
-    <TodayProgress
-      v-if="tab.progress"
-      :progress="tab.progress"
-    />
+    <!-- Progress -->
+    <TodayProgress v-if="tab.progress" :progress="tab.progress" />
 
     <TodayHeader />
 
@@ -133,43 +154,81 @@ function goDetail(id) {
       :on-row-update="onRowUpdate"
     />
 
-    <!-- メインのアクションリスト（時間帯タブに応じてフィルタ済み） -->
-    <section class="mt-6">
-      <h2 class="text-lg font-semibold mb-2">
-        {{ activeSlotLabel }}の習慣
-      </h2>
+    <!-- ============================================================
+         “すべて” タブ
+         ============================================================ -->
+    <template v-if="isAll">
+      <section class="mt-6">
+        <h2 class="text-lg font-semibold mb-2">すべて（未完了）</h2>
+        <TodayActionableSection
+          :items="allActionable"
+          :on-row-update="onRowUpdate"
+          :go-detail="goDetail"
+          :is-focused="tab.isFocused"
+          :toggle-focus="tab.toggleFocus"
+        />
+      </section>
 
-      <TodayActionableSection
-        :items="actionable"
+      <TodayDoneSection
+        :show-completed="true"
+        :collapsed="tab.ui.state.collapse.done"
+        :items="allDone"
         :on-row-update="onRowUpdate"
-        :go-detail="goDetail"
-        :loading="false"
-        :is-focused="tab.isFocused"
-        :toggle-focus="tab.toggleFocus"
+        @toggle-collapse-done="tab.toggleCollapseDone"
       />
-    </section>
+    </template>
 
-    <!-- いつでも -->
-    <TodayAnytimeSection
-      :items="anytime"
-      :on-row-update="onRowUpdate"
-    />
+    <!-- ============================================================
+         “slot” タブ（朝/昼/夕/夜）
+         ============================================================ -->
+    <template v-else>
+      <!-- slot actionable -->
+      <section class="mt-6">
+        <h2 class="text-lg font-semibold mb-2">
+          {{ activeSlotLabel }}の習慣
+        </h2>
 
-    <!-- 次の時間帯（自動タブのときだけ） -->
-    <TodayNextSlotSection
-      v-if="showNextSlot && nextSlot"
-      :next-slot="nextSlot"
-      :items="nextSlotHabits"
-      :on-row-update="onRowUpdate"
-    />
+        <TodayActionableSection
+          :items="slotActionable"
+          :on-row-update="onRowUpdate"
+          :go-detail="goDetail"
+          :is-focused="tab.isFocused"
+          :toggle-focus="tab.toggleFocus"
+        />
+      </section>
 
-    <!-- 完了（時間帯 1..4 のみ） -->
-    <TodayDoneSection
-      :show-completed="tab.ui.state.filter.showCompleted"
-      :collapsed="tab.ui.state.collapse.done"
-      :items="done"
-      :on-row-update="onRowUpdate"
-      @toggle-collapse-done="tab.toggleCollapseDone"
-    />
+      <!-- anytime actionable -->
+      <TodayAnytimeSection
+        v-if="anytimeActionable.length"
+        :items="anytimeActionable"
+        :on-row-update="onRowUpdate"
+      />
+
+      <!-- 次の時間帯 -->
+      <TodayNextSlotSection
+        v-if="showNextSlot && nextSlot"
+        :next-slot="nextSlot"
+        :items="nextSlotHabits"
+        :on-row-update="onRowUpdate"
+      />
+
+      <!-- slot done -->
+      <TodayDoneSection
+        :show-completed="tab.ui.state.filter.showCompleted"
+        :collapsed="tab.ui.state.collapse.done"
+        :items="slotDone"
+        :on-row-update="onRowUpdate"
+        @toggle-collapse-done="tab.toggleCollapseDone"
+      />
+
+      <!-- anytime done -->
+      <TodayDoneSection
+        v-if="anytimeDone.length"
+        :show-completed="true"
+        :collapsed="false"
+        :items="anytimeDone"
+        :on-row-update="onRowUpdate"
+      />
+    </template>
   </div>
 </template>

@@ -9,9 +9,6 @@ use Carbon\Carbon;
 
 class TodayController extends Controller
 {
-    /**
-     * GET /api/today
-     */
     public function show(Request $request)
     {
         $user = $request->user();
@@ -21,16 +18,16 @@ class TodayController extends Controller
         $today = Carbon::now($tz)->startOfDay();
         $now   = Carbon::now($tz);
 
-        // 今日のログ & 未来の pending リマインドをロード
+        // 今日のログ & pending
         $habits = Habit::with([
             'logs' => function ($q) use ($today) {
                 $q->whereDate('date', $today->toDateString())
-                    ->orderByDesc('id');
+                  ->orderByDesc('id');
             },
             'logs.remindTasks' => function ($q) use ($now) {
                 $q->where('status', 'pending')
-                    ->where('remind_at', '>', $now)
-                    ->orderBy('remind_at', 'asc');
+                  ->where('remind_at', '>', $now)
+                  ->orderBy('remind_at', 'asc');
             },
             'times',
         ])
@@ -38,34 +35,29 @@ class TodayController extends Controller
         ->orderBy('id')
         ->get();
 
-        // ★ フィルタしない（習慣は全部返す）
-        $planned = $habits;
-
         $items = [];
         $doneCount = 0;
 
-        foreach ($planned as $h) {
+        foreach ($habits as $h) {
 
-            /** @var HabitLog|null */
             $todayLog = $h->logs->first();
-            $status = $todayLog?->status ?? 'none';
+            $status   = $todayLog?->status ?? 'none';
 
             if ($status === 'done') {
                 $doneCount++;
             }
 
-            // 最も近い future pending
             $pending = $todayLog?->remindTasks?->first();
 
             $items[] = [
                 'h' => [
                     'id'         => $h->id,
-                    'title'      => $h->getAttribute('title') ?? $h->getAttribute('name'),
-                    'name'       => $h->getAttribute('name'),
+                    'title'      => $h->title,
+                    'name'       => $h->name,
                     'time_slot'  => (int)($h->time_slot ?? 0),
-                    'category'   => $h->getAttribute('category'),
-                    'color_tag'  => $h->getAttribute('color_tag'),
-                    'evaluation' => $h->getAttribute('evaluation_type'),
+                    'category'   => $h->category,
+                    'color_tag'  => $h->color_tag,
+                    'evaluation' => $h->evaluation_type,
                 ],
                 'today_log' => $todayLog ? [
                     'id'         => $todayLog->id,
@@ -75,7 +67,6 @@ class TodayController extends Controller
                     'date'       => optional($todayLog->date)?->toDateString(),
                     'updated_at' => optional($todayLog->updated_at)?->toIso8601String(),
                 ] : null,
-
                 'pending_task' => $pending ? [
                     'id'        => $pending->id,
                     'remind_at' => optional($pending->remind_at)?->setTimezone($tz)->toIso8601String(),
@@ -84,7 +75,7 @@ class TodayController extends Controller
             ];
         }
 
-        // 未来 pending の中から top_pick を決定
+        // pending の中で一番近いもの
         $nearest = collect($items)
             ->filter(fn ($it) => $it['pending_task'] !== null)
             ->sortBy(fn ($it) => $it['pending_task']['remind_at'])
@@ -95,7 +86,7 @@ class TodayController extends Controller
             'remind_task_id' => $nearest['pending_task']['id'],
         ] : null;
 
-        // 時間帯スロット定義（フロントと一致）
+        // slot 定義（front と共通）
         $slotDefs = [
             ['label' => 'anytime', 'code' => 0],
             ['label' => 'morning', 'code' => 1],
@@ -104,17 +95,27 @@ class TodayController extends Controller
             ['label' => 'night',   'code' => 4],
         ];
 
-        // フロントと同じ now_slot 判定
-        $hour = (int)$now->format('H');
+        /**
+         * === 新しい now_slot 判定 ===
+         *
+         * 00:00–04:59  → night (4)
+         * 05:00–10:59  → morning (1)
+         * 11:00–15:59  → noon (2)
+         * 16:00–19:59  → evening (3)
+         * 20:00–23:59  → night (4)
+         */
+        $minutes = ((int)$now->format('H')) * 60 + (int)$now->format('i');
 
-        if ($hour >= 5 && $hour <= 10) {
-            $nowSlot = 1;  // 朝
-        } elseif ($hour >= 11 && $hour <= 15) {
-            $nowSlot = 2;  // 昼
-        } elseif ($hour >= 16 && $hour <= 19) {
-            $nowSlot = 3;  // 夕
+        if ($minutes < 5 * 60) {
+            $nowSlot = 4;
+        } elseif ($minutes < 11 * 60) {
+            $nowSlot = 1;
+        } elseif ($minutes < 16 * 60) {
+            $nowSlot = 2;
+        } elseif ($minutes < 20 * 60) {
+            $nowSlot = 3;
         } else {
-            $nowSlot = 4;  // 夜
+            $nowSlot = 4;
         }
 
         return response()->json([
