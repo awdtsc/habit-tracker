@@ -8,7 +8,7 @@ import { toSlotNum } from '@/domain/timeutil'
 import { todayYmd as _todayYmd, ymd as _ymd } from '@/domain/dates'
 
 import { initUiState, createFocusState } from './useTodayUi'
-import { createTodayLists } from './useTodayLists'   // ★ Codex 中核
+import { createTodayLists } from './useTodayLists'   // ← Codex の中核
 
 export function useTodayState() {
   const ui    = useUiState()
@@ -43,22 +43,21 @@ export function useTodayState() {
   const focus = createFocusState(ui, serverDate)
 
   /* ============================================================
-   * TodayLists（TodayTab の全データソース）
+   * TodayLists（TodayTab 全表示データ）
    * ========================================================== */
   const lists = createTodayLists({
     ui,
     habits,
-    board,                // ← ★ boardごと渡すように修正
+    board,       // ← ★ board 全体を渡す
     todayYmd,
     serverNow,
     serverNowSlot,
   })
 
-  // ★ TodayTab から window.__today.items を参照するため
   const items = computed(() => lists.items?.value ?? lists.items ?? [])
 
   /* ============================================================
-   * applyToggleDiff
+   * applyToggleDiff (差分を board に反映)
    * ========================================================== */
   function applyToggleDiff(diff) {
     if (!diff) return
@@ -76,8 +75,8 @@ export function useTodayState() {
 
     const key = logKey(habit_id, date, time_slot)
 
-    // ★ 重要： board.state.checks を「新しいオブジェクト」で置き換える
-    board.state.checks = {
+    // ★ Codex 指定：イミュータブル置き換え
+    board.replaceChecks({
       ...board.state.checks,
       [key]: {
         ...(board.state.checks[key] || {}),
@@ -87,14 +86,14 @@ export function useTodayState() {
         date,
         time_slot,
       },
-    }
+    })
 
     if (top_pick !== undefined) apiTopPick.value = top_pick
     if (today_rate !== undefined) ui.state.todayRate = today_rate
   }
 
   /* ============================================================
-   * fetchToday（バックエンドから今日の全データを取る）
+   * fetchToday（初期ロード）
    * ========================================================== */
   async function fetchToday() {
     if (loading.value) return
@@ -117,7 +116,7 @@ export function useTodayState() {
       const todayStr = todayYmd()
 
       /* -------------------------------------------
-       * habits の整形（Codex 指定バージョン）
+       * habits 整形（Codex 仕様）
        * ----------------------------------------- */
       habits.value = planned.map(row => {
         const h = row.h || {}
@@ -135,9 +134,9 @@ export function useTodayState() {
       })
 
       /* -------------------------------------------
-       * board.log の初期化（イミュータブル更新）
+       * board.checks 初期化（replaceChecks）
        * ----------------------------------------- */
-      const nextChecks = { ...board.state.checks }
+      const nextChecks = {}
 
       for (const row of planned) {
         const h   = row.h || {}
@@ -157,7 +156,7 @@ export function useTodayState() {
         }
       }
 
-      board.state.checks = nextChecks
+      board.replaceChecks(nextChecks)
 
     } catch (e) {
       if (e?.response?.status !== 401) {
@@ -169,7 +168,7 @@ export function useTodayState() {
   }
 
   /* ============================================================
-   * onUpdate（チェック or 評価の更新）
+   * onUpdate（check/rating 変更）
    * ========================================================== */
   async function onUpdate(payload) {
     if (!payload || payload.id == null) return
@@ -181,7 +180,7 @@ export function useTodayState() {
     const slot    = h.time_slot ?? 0
     const dateISO = todayYmd()
 
-    /* rating 変更 */
+    /* ----- rating 更新 ----- */
     if (payload.rating !== undefined && payload.rating !== null) {
       try {
         const diff = await board.toggle(
@@ -198,15 +197,15 @@ export function useTodayState() {
       return
     }
 
-    /* toggle */
+    /* ----- check toggle ----- */
     const key  = logKey(hid, dateISO, slot)
     const prev = board.state.checks[key]
 
-    // __pending の付与もオブジェクト置き換えで行う
-    board.state.checks = { 
-      ...board.state.checks, 
-      [key]: { ...(prev || {}), __pending: true } 
-    }
+    // pending 付与（Codex 方式）
+    board.replaceChecks({
+      ...board.state.checks,
+      [key]: { ...(prev || {}), __pending: true }
+    })
 
     try {
       const diff = await board.toggle(
@@ -220,10 +219,14 @@ export function useTodayState() {
     } catch (e) {
       console.error('[TodayState] toggle failed', e)
     } finally {
-      // __pending を除去（これもイミュータブル更新）
+      // pending 削除
       const cur = { ...(board.state.checks[key] || {}) }
       delete cur.__pending
-      board.state.checks = { ...board.state.checks, [key]: cur }
+
+      board.replaceChecks({
+        ...board.state.checks,
+        [key]: cur
+      })
     }
   }
 

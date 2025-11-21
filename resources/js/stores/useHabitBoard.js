@@ -8,6 +8,7 @@ import {
   isDone,
   recomputeRates,
   getLog,
+  replaceChecks,
 } from './useHabitBoardCore'
 
 import {
@@ -30,6 +31,7 @@ export function useHabitBoard() {
     recomputeRates,
     loadLogs,
     getLog,
+    replaceChecks,
     isScheduledFor,
     logKey,
     isDone,

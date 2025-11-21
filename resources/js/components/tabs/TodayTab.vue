@@ -17,7 +17,7 @@ import { useTodayTab } from '@/composables/useTodayTab'
 
 /* ============================================================
  * Stores
- * ========================================================== */
+ * ============================================================ */
 const core   = useTodayState()
 const auth   = useAuthStore()
 const weekly = useWeeklyBoard()
@@ -32,7 +32,7 @@ if (typeof window !== 'undefined') {
 
 /* ============================================================
  * Lifecycle
- * ========================================================== */
+ * ============================================================ */
 onMounted(async () => {
   await auth.waitUntilReady()
   if (!auth.isAuthenticated) return
@@ -46,7 +46,7 @@ onMounted(async () => {
 
 /* ============================================================
  * Helpers
- * ========================================================== */
+ * ============================================================ */
 const normalize = (raw) => {
   const v = unref(raw)
   return Array.isArray(v) ? v : []
@@ -54,24 +54,32 @@ const normalize = (raw) => {
 
 const SLOT_LABEL = { 1: '朝', 2: '昼', 3: '夕', 4: '夜' }
 
+/* ============================================================
+ * Progress（★ここが最重要）
+ * ============================================================ */
+
+// core.lists.progress は ComputedRef なので .value を返す
+const progress = computed(() => {
+  const p = core.lists.progress
+  return p?.value ?? { total: 0, completed: 0 }
+})
+
+/* ============================================================
+ * UI
+ * ============================================================ */
 const activeSlotLabel = computed(() => {
   const s = unref(tab.activeSlot)
   return s == null ? 'すべて' : SLOT_LABEL[s] ?? '—'
 })
 
-/* 自動タブのときだけ表示 */
 const showNextSlot = computed(() => {
   const f = tab.ui?.state?.filter ?? {}
-  const v = f.timeslot ?? 'auto'
-  return v === 'auto'
+  return (f.timeslot ?? 'auto') === 'auto'
 })
 
-/* ============================================================
- * Lists / Data mapping
- * ========================================================== */
+/* Lists */
 const activeSlot = computed(() => unref(tab.activeSlot))
 
-/* ====== “すべて” タブ ====== */
 const isAll = computed(() => activeSlot.value == null)
 
 const allActionable = computed(() =>
@@ -82,7 +90,6 @@ const allDone = computed(() =>
   isAll.value ? normalize(tab.allDone) : []
 )
 
-/* ====== slot タブ (1〜4) ====== */
 const slotActionable = computed(() =>
   isAll.value ? [] : normalize(tab.slotActionable)
 )
@@ -91,7 +98,6 @@ const slotDone = computed(() =>
   isAll.value ? [] : normalize(tab.slotDone)
 )
 
-/* ====== anytime（slotタブのときだけ）====== */
 const anytimeActionable = computed(() =>
   isAll.value ? [] : normalize(tab.anytimeActionable)
 )
@@ -100,13 +106,12 @@ const anytimeDone = computed(() =>
   isAll.value ? [] : normalize(tab.anytimeDone)
 )
 
-/* ====== Next Slot ====== */
 const nextSlot = computed(() => unref(tab.nextSlot) ?? null)
 const nextSlotHabits = computed(() => normalize(tab.nextSlotHabits))
 
 /* ============================================================
  * Events
- * ========================================================== */
+ * ============================================================ */
 function onRowUpdate(habit, payload = {}) {
   if (!habit) return
   tab.onUpdate({
@@ -137,8 +142,8 @@ function goDetail(id) {
       </div>
     </header>
 
-    <!-- Progress -->
-    <TodayProgress v-if="tab.progress" :progress="tab.progress" />
+    <!-- Progress（★修正済み） -->
+    <TodayProgress :progress="progress" />
 
     <TodayHeader />
 
@@ -150,9 +155,6 @@ function goDetail(id) {
       :on-row-update="onRowUpdate"
     />
 
-    <!-- ============================================================
-         “すべて” タブ
-         ============================================================ -->
     <template v-if="isAll">
       <section class="mt-6">
         <h2 class="text-lg font-semibold mb-2">すべて（未完了）</h2>
@@ -174,16 +176,9 @@ function goDetail(id) {
       />
     </template>
 
-    <!-- ============================================================
-         “slot” タブ（朝/昼/夕/夜）
-         ============================================================ -->
     <template v-else>
-      <!-- slot actionable -->
       <section class="mt-6">
-        <h2 class="text-lg font-semibold mb-2">
-          {{ activeSlotLabel }}の習慣
-        </h2>
-
+        <h2 class="text-lg font-semibold mb-2">{{ activeSlotLabel }}の習慣</h2>
         <TodayActionableSection
           :items="slotActionable"
           :on-row-update="onRowUpdate"
@@ -193,14 +188,12 @@ function goDetail(id) {
         />
       </section>
 
-      <!-- anytime actionable -->
       <TodayAnytimeSection
         v-if="anytimeActionable.length"
         :items="anytimeActionable"
         :on-row-update="onRowUpdate"
       />
 
-      <!-- 次の時間帯 -->
       <TodayNextSlotSection
         v-if="showNextSlot && nextSlot"
         :next-slot="nextSlot"
@@ -208,7 +201,6 @@ function goDetail(id) {
         :on-row-update="onRowUpdate"
       />
 
-      <!-- slot done -->
       <TodayDoneSection
         :show-completed="tab.ui.state.filter.showCompleted"
         :collapsed="tab.ui.state.collapse.done"
@@ -217,7 +209,6 @@ function goDetail(id) {
         @toggle-collapse-done="tab.toggleCollapseDone"
       />
 
-      <!-- anytime done -->
       <TodayDoneSection
         v-if="anytimeDone.length"
         :show-completed="true"

@@ -8,6 +8,7 @@ import {
   toSlotNum,
   logKey,
   recomputeRates,
+  replaceChecks,
 } from './useHabitBoardCore'
 
 /* =========================================================
@@ -40,7 +41,7 @@ function safeAuth() {
  * ======================================================= */
 export async function fetchBoard({ silent = true } = {}) {
   const auth = safeAuth()
-  if (!auth?.isAuthenticated) return   // ← ★修正点: fetchedOnce 削除
+  if (!auth?.isAuthenticated) return
 
   if (!silent) state.loading = true
 
@@ -63,12 +64,17 @@ export async function fetchBoard({ silent = true } = {}) {
       time_slot: toSlotNum(h.time_slot),
     }))
 
-    // 古い habit_id のログ掃除
+    // 古い habit_id のログ掃除（reactive 再代入方式）
     const valid = new Set(state.habits.map((h) => h.id))
-    for (const key of Object.keys(state.checks)) {
-      const [habitId] = key.split('|')
-      if (!valid.has(Number(habitId))) delete state.checks[key]
-    }
+
+    const filtered = Object.fromEntries(
+      Object.entries(state.checks).filter(([key]) => {
+        const [habitId] = key.split('|')
+        return valid.has(Number(habitId))
+      })
+    )
+
+    replaceChecks(filtered)
 
     state.lastFetchedAt = Date.now()
     recomputeRates()
@@ -96,13 +102,7 @@ export async function toggle(
 
   const slotNum = toSlotNum(slot)
   const k = logKey(habitId, dateISO, slotNum)
-  const prev =
-    state.checks[k] ?? {
-      status: 'none',
-      rating: 0,
-      updated_at: null,
-    }
-
+  const prev = state.checks[k] || {}
   const opId = nextOpId(k)
   const h = state.habits.find((x) => x.id === habitId)
 
@@ -126,8 +126,8 @@ export async function toggle(
     }
   }
 
-  // 即時ローカル反映
-  state.checks = { ...state.checks, [k]: next }
+  // 即時反映（replaceChecks に統一）
+  replaceChecks({ ...state.checks, [k]: next })
   recomputeRates()
   incPending(k)
 
@@ -144,7 +144,6 @@ export async function toggle(
 
     const { data } = await axios.post('/api/habit-logs/toggle', payload)
 
-    // 古い操作なら何もしない
     if (!isLatest(k, opId)) return null
 
     const ratingVal = data?.rating ?? next.rating
@@ -162,14 +161,13 @@ export async function toggle(
       updated_at: data?.updated_at ?? new Date().toISOString(),
     }
 
-    // サーバー確定反映
-    state.checks = { ...state.checks, [k]: updated }
+    replaceChecks({ ...state.checks, [k]: updated })
     recomputeRates()
 
     return updated
   } catch (e) {
     // revert
-    state.checks = { ...state.checks, [k]: prev }
+    replaceChecks({ ...state.checks, [k]: prev })
     recomputeRates()
     return null
   } finally {
@@ -182,7 +180,7 @@ export async function toggle(
  * ======================================================= */
 export async function loadLogs(startISO, endISO) {
   const auth = safeAuth()
-  if (!auth?.isAuthenticated) return   // ← ★修正点: fetchedOnce 削除
+  if (!auth?.isAuthenticated) return
 
   try {
     const { data } = await axios.get('/api/habit-logs', {
@@ -212,7 +210,7 @@ export async function loadLogs(startISO, endISO) {
       }
     }
 
-    state.checks = newChecks
+    replaceChecks(newChecks)
     recomputeRates()
   } catch (e) {
     if (e?.response?.status !== 401) {
@@ -245,7 +243,7 @@ export function setupHabitBoardAuthEvents() {
 
   window.addEventListener('auth:logged-out', () => {
     state.habits = []
-    state.checks = {}
+    replaceChecks({})
     state.rates = new Array(7).fill(0)
   })
 }
