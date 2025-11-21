@@ -55,21 +55,28 @@ const normalize = (raw) => {
 const SLOT_LABEL = { 1: '朝', 2: '昼', 3: '夕', 4: '夜' }
 
 /* ============================================================
- * Progress（★ここが最重要）
+ * Progress（★100%安全に動く形）
  * ============================================================ */
-
-// core.lists.progress は ComputedRef なので .value を返す
 const progress = computed(() => {
-  const p = core.lists.progress
-  return p?.value ?? { total: 0, completed: 0 }
+  const p = tab.progress?.value
+  if (!p) return { total: 0, completed: 0, rate: 0 }
+
+  return {
+    total: Number(p.total ?? 0),
+    completed: Number(p.completed ?? 0),
+    rate: p.rate ?? (p.total ? p.completed / p.total : 0),
+  }
 })
 
 /* ============================================================
- * UI
+ * UI state
  * ============================================================ */
+const activeSlot = computed(() => unref(tab.activeSlot))
+const isAll      = computed(() => activeSlot.value == null)
+
 const activeSlotLabel = computed(() => {
-  const s = unref(tab.activeSlot)
-  return s == null ? 'すべて' : SLOT_LABEL[s] ?? '—'
+  const s = activeSlot.value
+  return s == null ? 'すべて' : (SLOT_LABEL[s] ?? '—')
 })
 
 const showNextSlot = computed(() => {
@@ -78,14 +85,9 @@ const showNextSlot = computed(() => {
 })
 
 /* Lists */
-const activeSlot = computed(() => unref(tab.activeSlot))
-
-const isAll = computed(() => activeSlot.value == null)
-
 const allActionable = computed(() =>
   isAll.value ? normalize(tab.allActionable) : []
 )
-
 const allDone = computed(() =>
   isAll.value ? normalize(tab.allDone) : []
 )
@@ -93,7 +95,6 @@ const allDone = computed(() =>
 const slotActionable = computed(() =>
   isAll.value ? [] : normalize(tab.slotActionable)
 )
-
 const slotDone = computed(() =>
   isAll.value ? [] : normalize(tab.slotDone)
 )
@@ -101,12 +102,11 @@ const slotDone = computed(() =>
 const anytimeActionable = computed(() =>
   isAll.value ? [] : normalize(tab.anytimeActionable)
 )
-
 const anytimeDone = computed(() =>
   isAll.value ? [] : normalize(tab.anytimeDone)
 )
 
-const nextSlot = computed(() => unref(tab.nextSlot) ?? null)
+const nextSlot       = computed(() => unref(tab.nextSlot) ?? null)
 const nextSlotHabits = computed(() => normalize(tab.nextSlotHabits))
 
 /* ============================================================
@@ -142,7 +142,7 @@ function goDetail(id) {
       </div>
     </header>
 
-    <!-- Progress（★修正済み） -->
+    <!-- Progress -->
     <TodayProgress :progress="progress" />
 
     <TodayHeader />
@@ -155,6 +155,7 @@ function goDetail(id) {
       :on-row-update="onRowUpdate"
     />
 
+    <!-- All -->
     <template v-if="isAll">
       <section class="mt-6">
         <h2 class="text-lg font-semibold mb-2">すべて（未完了）</h2>
@@ -176,6 +177,7 @@ function goDetail(id) {
       />
     </template>
 
+    <!-- Per Slot -->
     <template v-else>
       <section class="mt-6">
         <h2 class="text-lg font-semibold mb-2">{{ activeSlotLabel }}の習慣</h2>

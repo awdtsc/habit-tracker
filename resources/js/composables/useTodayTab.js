@@ -1,92 +1,58 @@
 // resources/js/composables/useTodayTab.js
+
 import { computed, unref } from 'vue'
 
 /**
- * TodayTab 用の統合ロジック
+ * TodayTab の UI / 統合ロジック
  * core は useTodayState() の返り値
  */
 export function useTodayTab(core) {
-  const lists = core.lists
 
   /* ============================================================
-   * Slots / Lists マッピング
-   * ============================================================ */
+   * useTodayLists の返却値は useTodayState から flat に露出している
+   * ========================================================== */
 
-  // 今日やる予定の全習慣
-  const plannedHabits = computed(() =>
-    lists.plannedHabits?.value ?? []
-  )
+  // 今日やる予定の一覧
+  const plannedHabits = core.plannedHabits
 
-  // “すべてタブ” の未完了
-  const allActionable = computed(() =>
-    lists.allActionable?.value ?? []
-  )
+  // すべてタブ用
+  const allActionable = core.allActionable
+  const allDone       = core.allDone
 
-  // “すべてタブ” の完了
-  const allDone = computed(() =>
-    lists.allDone?.value ?? []
-  )
+  // slot 切替用
+  const slotActionable = core.slotActionable
+  const slotDone       = core.slotDone
 
-  // “slotタブ（1〜4）” の未完了
-  const slotActionable = computed(() =>
-    lists.slotActionable?.value ?? []
-  )
+  // anytime
+  const anytimeActionable = core.anytimeActionable
+  const anytimeDone       = core.anytimeDone
 
-  // “slotタブ” の完了
-  const slotDone = computed(() =>
-    lists.slotDone?.value ?? []
-  )
+  // next slot
+  const nextSlot       = core.nextSlot
+  const nextSlotHabits = core.nextSlotHabits
 
-  // anytime（slotタブの時だけ）
-  const anytimeActionable = computed(() =>
-    lists.anytimeActionable?.value ?? []
-  )
-
-  const anytimeDone = computed(() =>
-    lists.anytimeDone?.value ?? []
-  )
-
-  // 次のスロット
-  const nextSlot = computed(() =>
-    lists.nextSlot?.value ?? null
-  )
-
-  const nextSlotHabits = computed(() =>
-    lists.nextSlotHabits?.value ?? []
-  )
+  // slot grouping
+  const bySlot = core.plannedBySlot
 
   /* ============================================================
-   * bySlot（Weekly UI など共通用）
-   * ============================================================ */
-  const bySlot = computed(() =>
-    lists.plannedBySlot?.value ?? { 0: [], 1: [], 2: [], 3: [], 4: [] }
-  )
-
-  /* ============================================================
-   * Top Pick（未完了の中で最も優先度の高いもの）
-   * ============================================================ */
+   * Top Pick（未完了の中で最優先）
+   * ========================================================== */
   const topPick = computed(() => {
-    const source = [
-      ...allActionable.value,
-      ...slotActionable.value,
+    const list = [
+      ...unref(allActionable),
+      ...unref(slotActionable),
     ]
-
-    if (!source.length) return null
-
-    return source[0] // computePriority 済のためソート済み
+    return list.length ? list[0] : null
   })
 
   /* ============================================================
-   * Timeslot ラベル
-   * ============================================================ */
-  const activeSlot = computed(() =>
-    unref(lists.activeSlot)
-  )
+   * Active Slot / Timeslot Labels
+   * ========================================================== */
+  const activeSlot = core.activeSlot
 
   const timeslotLabel = computed(() => {
-    const s = activeSlot.value
+    const s = unref(activeSlot)
     const map = {
-      0: 'いつでも',
       1: '朝',
       2: '昼',
       3: '夕',
@@ -97,41 +63,42 @@ export function useTodayTab(core) {
   })
 
   /* ============================================================
-   * Progress
-   * ============================================================ */
-  const progress = computed(() =>
-    lists.progress?.value ?? { total: 0, completed: 0 }
-  )
+   * Progress（★重要）
+   * useTodayLists が返すのは progress（ComputedRef）
+   * ========================================================== */
+  const progress = core.progress  // ← progressRate ではなくこれ！
 
   /* ============================================================
    * Export
-   * ============================================================ */
+   * ========================================================== */
   return {
     ui: core.ui,
+
     loading: core.loading,
     loaded: core.loaded,
 
-    lists,
+    /* 一覧データ */
     plannedHabits,
     bySlot,
 
-    /* TodayTab.vue が使う一覧 */
     allActionable,
     allDone,
+
     slotActionable,
     slotDone,
+
     anytimeActionable,
     anytimeDone,
 
     nextSlot,
     nextSlotHabits,
-    topPick,
 
+    topPick,
     activeSlot,
     timeslotLabel,
     progress,
 
-    /* 操作 */
+    /* 操作関数 */
     onUpdate: core.onUpdate,
     getTodayLog: core.getTodayLog,
     isFocused: core.isFocused,
