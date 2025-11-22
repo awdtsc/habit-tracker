@@ -1,164 +1,76 @@
 // resources/js/composables/today/useTodayLists.js
-
 import { computed } from 'vue'
-import { toSlotNum } from '@/domain/timeutil'
+import { selectTodayViewModel } from '@/stores/habitBoard/selectors'
 
 export function useTodayLists(ui, habits, board, todayYmd, serverNowSlot) {
 
-  const today = todayYmd()
-
-  /* ============================================================
-   * 1. items（habit + log）
-   * ========================================================== */
-  const items = computed(() => {
-    const arr = habits.value ?? []
-    return arr.map(h => {
-      const log = board.getLog(h.id, today, h.time_slot)
-      return { h, log }
+  const view = computed(() => {
+    return selectTodayViewModel({
+      habits: habits.value ?? [],
+      board,
+      today: todayYmd(),
+      serverNowSlot: serverNowSlot.value ?? null,
     })
   })
 
   /* ============================================================
-   * 2. activeSlot 判定
+   * activeSlot（UI の数値をそのまま使う）
    * ========================================================== */
   const activeSlot = computed(() => {
     const v = ui?.state?.filter?.timeslot
 
-    if (!v || v === 'auto' || v === 'all') return null
+    // null / auto (= null) / all (= 0) の扱いを統一
+    if (v === null || v === 'auto') return null
+    if (v === 'all') return null
+    if (v === 0) return null
 
-    const map = {
-        morning: 1,
-        noon: 2,
-        evening: 3,
-        night: 4,
-    }
+    // 数値がそのまま来ている場合
+    if (typeof v === 'number') return v
 
+    // 互換性：文字列が来ても一応 map
+    const map = { morning: 1, noon: 2, evening: 3, night: 4 }
     return map[v] ?? null
-    })
-    
-  /* ============================================================
-   * 3. 今日対象判定（必要ならロジック追加）
-   * ========================================================== */
-  const plannedHabits = computed(() => {
-    return items.value
   })
 
-  /* ============================================================
-   * 4. 未完了 / 完了 仕分け
-   * ========================================================== */
-  const actionable = computed(() =>
-    plannedHabits.value.filter(x => x.log?.status !== 'done')
-  )
+  const items          = computed(() => view.value.items)
+  const allActionable  = computed(() => view.value.allActionable)
+  const allDone        = computed(() => view.value.allDone)
 
-  const done = computed(() =>
-    plannedHabits.value.filter(x => x.log?.status === 'done')
-  )
+  const anytimeActionable = computed(() => view.value.anytimeActionable)
+  const anytimeDone       = computed(() => view.value.anytimeDone)
 
-  /* ============================================================
-   * 5. スロット毎の分類
-   * ========================================================== */
-  const bySlot = computed(() => {
-    const g = { 0: [], 1: [], 2: [], 3: [], 4: [] }
-    for (const x of plannedHabits.value) {
-      const s = toSlotNum(x.h.time_slot)
-      g[s].push(x)
-    }
-    return g
-  })
-
-  /* anytime = 0 */
-  const anytimeActionable = computed(() =>
-    actionable.value.filter(x => x.h.time_slot === 0)
-  )
-  const anytimeDone = computed(() =>
-    done.value.filter(x => x.h.time_slot === 0)
-  )
-
-  /* slot = 1〜4 */
   const slotActionable = computed(() =>
     activeSlot.value == null
       ? []
-      : actionable.value.filter(x => x.h.time_slot === activeSlot.value)
+      : view.value.bySlot[activeSlot.value]?.actionable ?? []
   )
+
   const slotDone = computed(() =>
     activeSlot.value == null
       ? []
-      : done.value.filter(x => x.h.time_slot === activeSlot.value)
+      : view.value.bySlot[activeSlot.value]?.done ?? []
   )
 
-  /* ============================================================
-   * 6. “すべて（未完了）” 用
-   * ========================================================== */
-  const allActionable = computed(() =>
-    activeSlot.value == null ? actionable.value : []
-  )
-  const allDone = computed(() =>
-    activeSlot.value == null ? done.value : []
-  )
-
-  /* ============================================================
-   * 7. nextSlot
-   * ========================================================== */
-  const nextSlot = computed(() => {
-    if (activeSlot.value != null) return null
-
-    let s = Number(serverNowSlot.value ?? 1)
-    if (s < 4) s++
-    else return null
-
-    // 次スロットに習慣がなければ表示しない
-    if (!bySlot.value[s]?.length) return null
-    return s
-  })
-
+  const nextSlot       = computed(() => view.value.nextSlot)
   const nextSlotHabits = computed(() =>
-    nextSlot.value ? bySlot.value[nextSlot.value] : []
+    view.value.nextSlot != null ? view.value.bySlot[view.value.nextSlot]?.all ?? [] : []
   )
 
-  /* ============================================================
-   * 8. progress（達成率）
-   * ========================================================== */
-  const progress = computed(() => {
-    const total = plannedHabits.value.length
-    const completed = done.value.length
+  const plannedBySlot = computed(() => view.value.bySlot)
+  const progress      = computed(() => view.value.progress)
 
-    return {
-      total,
-      completed,
-      rate: total === 0 ? 0 : completed / total,
-    }
-  })
-
-  /* ============================================================
-   * 返却
-   * ========================================================== */
   return {
     items,
-
-    /* 今日対象 */
-    plannedHabits,
-
-    /* すべてタブ */
     allActionable,
     allDone,
-
-    /* スロットタブ */
     slotActionable,
     slotDone,
-
-    /* anytime */
     anytimeActionable,
     anytimeDone,
-
-    /* next slot */
     nextSlot,
     nextSlotHabits,
-
-    /* slot grouping */
-    plannedBySlot: bySlot,
+    plannedBySlot,
     activeSlot,
-
-    /* progress */
     progress,
   }
 }

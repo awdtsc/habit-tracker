@@ -2,6 +2,7 @@
 <template>
   <section v-if="items.length" class="space-y-2">
     <h2 class="text-sm font-semibold text-gray-700">いつでも</h2>
+
     <div class="rounded-2xl border bg-white divide-y">
       <div
         v-for="x in items"
@@ -9,9 +10,8 @@
         class="px-4 py-3"
       >
         <HabitRow
-          :habit="x.h"
-          :log="x.log"
-          @update="(e) => onRowUpdate(x.h, e)"
+          :item="x"
+          @update="e => onRowUpdate(x.h, e)"
         />
       </div>
     </div>

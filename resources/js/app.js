@@ -19,7 +19,6 @@ Alpine.start()
 // Sanctum cookie
 axios.defaults.withCredentials = true
 
-
 ;(async () => {
 
   /* ---------------------------------------------
@@ -66,14 +65,13 @@ axios.defaults.withCredentials = true
   const auth = useAuthStore()
   const board = useHabitBoard()
 
-  /* ======== 🔥 Debug Expose（今回の不具合の修正点） ======== */
+  // Debug expose
   if (typeof window !== 'undefined') {
     window.useAuthStore = useAuthStore
     window.useHabitBoard = useHabitBoard
     window.__auth = auth
     window.__board = board
   }
-  /* =========================================================== */
 
   /* ---------------------------------------------
    * 6. restore()（認証状態確定）
@@ -88,8 +86,10 @@ axios.defaults.withCredentials = true
   /* ---------------------------------------------
    * 7. Auth Guards（restore 後）
    * ------------------------------------------- */
-  const { injectAuthStore } = await import('./startup/auth-guards')
+  const { injectAuthStore, setupAuthGuards } = await import('./startup/auth-guards')
+
   injectAuthStore(auth)
+  setupAuthGuards(router)
 
   /* ---------------------------------------------
    * 8. router 登録 → mount

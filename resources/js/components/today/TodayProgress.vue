@@ -3,41 +3,52 @@
 import { computed } from 'vue'
 
 /**
- * { total, completed } だけを受け取る。
- * anytime は親側（TodayTab）で除外済みという前提。
+ * progress:
+ *   { total, completed, rate }
+ *   - anytime の分は親（TodayTab）で除外済み
  */
 const props = defineProps({
   progress: {
     type: Object,
-    default: () => ({ total: 0, completed: 0 }),
+    default: () => ({ total: 0, completed: 0, rate: 0 }),
   },
 })
 
-const totalCount = computed(() => {
-  const v = props.progress
-  const n = Number(v?.total ?? 0)
+/* -------------------------------------------------------
+ * Number helpers
+ * ----------------------------------------------------- */
+function toNum(v) {
+  const n = Number(v)
   return Number.isFinite(n) && n >= 0 ? n : 0
-})
+}
 
-const doneCount = computed(() => {
-  const v = props.progress
-  const n = Number(v?.completed ?? 0)
-  return Number.isFinite(n) && n >= 0 ? n : 0
-})
+/* -------------------------------------------------------
+ * Normalized values
+ * ----------------------------------------------------- */
+const totalCount = computed(() => toNum(props.progress.total))
+const doneCount  = computed(() => toNum(props.progress.completed))
 
+/* -------------------------------------------------------
+ * % calculation
+ * ----------------------------------------------------- */
 const pct = computed(() => {
+  // rate が来ていたら優先（0〜1）
+  if (typeof props.progress.rate === 'number' && props.progress.rate >= 0) {
+    return Math.round(props.progress.rate * 100)
+  }
+
   if (!totalCount.value) return 0
-  const raw = (doneCount.value / totalCount.value) * 100
-  return Math.round(raw)
+  return Math.round((doneCount.value / totalCount.value) * 100)
 })
 </script>
 
 <template>
-  <div class="p-4 rounded border bg-white mb-4">
+  <div class="p-4 rounded-lg border bg-white mb-4">
     <div class="text-lg font-semibold">
       達成率 {{ doneCount }}/{{ totalCount }} ({{ pct }}%)
     </div>
-    <div class="mt-2 h-4 rounded-full bg-gray-200 overflow-hidden">
+
+    <div class="mt-2 h-3 rounded-full bg-gray-200 overflow-hidden">
       <div
         class="h-full bg-green-500 transition-all"
         :style="{ width: pct + '%' }"

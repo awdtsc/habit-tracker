@@ -1,19 +1,26 @@
 <!-- resources/js/components/today/HabitRow.vue -->
 <template>
-  <div class="flex items-center justify-between gap-4 py-3" :class="isDone ? 'opacity-70' : ''">
+  <div
+    class="flex items-center justify-between gap-4 py-3"
+    :class="isDone ? 'opacity-70' : ''"
+  >
+
     <!-- 左：タイトル＋目標文＋ミニ進捗バー -->
     <div class="min-w-0">
       <div class="font-medium truncate" :class="isDone ? 'line-through' : ''">
-        {{ habit.title }}
+        {{ h.title }}
       </div>
+
       <div class="text-xs text-gray-500 mt-0.5">
-        目標: {{ habit.goal_text ?? goalText(habit) }}
+        目標: {{ goalText(h) }}
       </div>
+
+      <!-- progress bar -->
       <div class="mt-1 h-2 w-44 rounded-full bg-gray-200 overflow-hidden">
         <div
           v-if="statusKey !== 'snoozed'"
           class="h-full bg-green-500 transition-all"
-          :style="{ width: Math.round(pct * 100) + '%' }"
+          :style="{ width: pct + '%' }"
         ></div>
         <div
           v-else
@@ -23,66 +30,88 @@
       </div>
     </div>
 
-    <!-- 右：タイプ別入力 + 状態/操作 -->
+    <!-- 右：操作 -->
     <div class="flex items-center gap-3 shrink-0">
 
-      <!-- ★ 自己評価型（self） → Rating UI -->
-      <template v-if="habit.evaluation_type === 'self'">
+      <!-- ★ 自己評価型：Rating UI -->
+      <template v-if="h.evaluation_type === 'self'">
         <Rating5
           v-if="log"
           :model-value="log.rating ?? 0"
           @update:modelValue="onRatingChange"
         />
+
+        <!-- status badge -->
         <span
           class="px-2 py-0.5 rounded-full text-xs"
-          :class="{
-            done:'bg-green-100 text-green-700',
-            inprogress:'bg-yellow-100 text-yellow-700',
-            none:'bg-blue-100 text-blue-700'
-          }[statusKey]"
+          :class="badgeClass"
         >
-          {{ {done:'完了', inprogress:'進行中', none:'未完了'}[statusKey] }}
+          {{ statusLabel }}
         </span>
       </template>
 
-      <!-- ★ 単純評価型（simple） → 完了ボタン -->
+      <!-- ★ 単純評価型：完了トグル -->
       <template v-else>
         <span
           class="px-2 py-0.5 rounded-full text-xs"
-          :class="{
-            done:'bg-green-100 text-green-700',
-            inprogress:'bg-yellow-100 text-yellow-700',
-            none:'bg-blue-100 text-blue-700'
-          }[statusKey]"
+          :class="badgeClass"
         >
-          {{ {done:'完了', inprogress:'進行中', none:'未完了'}[statusKey] }}
+          {{ statusLabel }}
         </span>
 
         <button
           class="px-2 py-1 text-sm rounded border hover:bg-gray-50"
           @click="toggleDone"
-          :title="isDone ? '未完に戻す' : '完了にする'">
+          :title="isDone ? '未完に戻す' : '完了にする'"
+        >
           {{ isDone ? '未完' : '完了' }}
         </button>
       </template>
 
-      <!-- 共通: その他のメニュー -->
+      <!-- … menu -->
       <div class="relative">
-        <button class="px-2 py-1 text-sm rounded border hover:bg-gray-50" @click="open = !open">…</button>
-        <div v-if="open" class="absolute right-0 mt-1 w-40 rounded border bg-white shadow z-10">
-          <button class="block w-full text-left px-3 py-2 hover:bg-gray-50" @click="snooze">あとで</button>
-          <button class="block w-full text-left px-3 py-2 hover:bg-gray-50" @click="skip">スキップ</button>
-          <button class="block w-full text-left px-3 py-2 hover:bg-gray-50" @click="$emit('detail', habit.id)">詳細</button>
+        <button
+          class="px-2 py-1 text-sm rounded border hover:bg-gray-50"
+          @click="open = !open"
+        >
+          …
+        </button>
+
+        <div
+          v-if="open"
+          class="absolute right-0 mt-1 w-40 rounded border bg-white shadow z-10"
+        >
+          <button
+            class="block w-full text-left px-3 py-2 hover:bg-gray-50"
+            @click="snooze"
+          >
+            あとで
+          </button>
+
+          <button
+            class="block w-full text-left px-3 py-2 hover:bg-gray-50"
+            @click="skip"
+          >
+            スキップ
+          </button>
+
+          <button
+            class="block w-full text-left px-3 py-2 hover:bg-gray-50"
+            @click="$emit('detail', h.id)"
+          >
+            詳細
+          </button>
         </div>
       </div>
     </div>
+
   </div>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
-import { progress, uiStatus } from '@/domain/progress'
 import Rating5 from '@/components/common/Rating5.vue'
+import { progress, uiStatus } from '@/domain/progress'
 
 const props = defineProps({
   habit: { type: Object, required: true },
@@ -90,32 +119,88 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update','detail'])
+
+/* v2 selector 互換構造 */
+const h   = props.habit
+const log = props.log
+
 const open = ref(false)
 
-const pct = computed(() => progress(props.habit, props.log))
-const statusKey = computed(() => uiStatus(props.habit, props.log))
-const isDone = computed(() => statusKey.value === 'done')
+/* -------------------------------------------------------
+ * progress / status
+ * ----------------------------------------------------- */
+const pct = computed(() => {
+  const p = progress(h, log)    // 0〜1
+  return Math.round(p * 100)
+})
 
+const statusKey = computed(() => uiStatus(h, log))
+const isDone    = computed(() => statusKey.value === 'done')
+
+/* -------------------------------------------------------
+ * badge 表示（色 + 文言）
+ * ----------------------------------------------------- */
+const badgeClass = computed(() => {
+  switch (statusKey.value) {
+    case 'done':
+      return 'bg-green-100 text-green-700'
+    case 'snoozed':
+      return 'bg-yellow-100 text-yellow-700'
+    case 'skipped':
+      return 'bg-gray-200 text-gray-700'
+    default:
+      return 'bg-blue-100 text-blue-700'
+  }
+})
+
+const statusLabel = computed(() => {
+  return {
+    done: '完了',
+    snoozed: 'あとで',
+    skipped: 'スキップ',
+    none: '未完了'
+  }[statusKey.value] ?? '未完了'
+})
+
+/* -------------------------------------------------------
+ * goal 表示
+ * ----------------------------------------------------- */
 function goalText(h) {
-  return h?.evaluation_type === 'self' ? '自己評価（0〜4）' : '1回'
+  return h.evaluation_type === 'self'
+    ? '自己評価（0〜4）'
+    : '1回'
 }
 
-/** simple用：完了トグル */
+/* -------------------------------------------------------
+ * Actions（全て emit('update', { status, rating }) で統一）
+ * ----------------------------------------------------- */
 function toggleDone() {
-  emit('update', { id: props.habit.id, status: isDone.value ? 'none' : 'done' })
+  emit('update', {
+    id: h.id,
+    status: isDone.value ? 'none' : 'done',
+  })
 }
 
-/** self用：レーティング変更 */
 function onRatingChange(val) {
-  emit('update', { id: props.habit.id, rating: val })
+  emit('update', {
+    id: h.id,
+    rating: val,
+  })
 }
 
 function snooze() {
-  emit('update', { id: props.habit.id, status: 'snoozed' })
+  emit('update', {
+    id: h.id,
+    status: 'snoozed',
+  })
   open.value = false
 }
+
 function skip() {
-  emit('update', { id: props.habit.id, status: 'skipped' })
+  emit('update', {
+    id: h.id,
+    status: 'skipped',
+  })
   open.value = false
 }
 </script>

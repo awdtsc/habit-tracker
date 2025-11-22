@@ -3,27 +3,14 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { routes } from './routes'
 
-// 📌 auth-guards は app.js で Pinia が作られてから動く
-import { setupAuthGuards } from '@/startup/auth-guards'
-
-/* =========================================================
- * Router 基本設定
- * ======================================================= */
+/**
+ * Router は「ルート定義だけ」を担当する。
+ * グローバルガード（認証など）は app.js 側で register する。
+ * これにより HMR 安定・循環参照削減・SPA bootstrap の順序が固定される。
+ */
 const router = createRouter({
-  // BASE_URL が無い場合でも "/" を使えるようにしておく
   history: createWebHistory(import.meta.env.BASE_URL || '/'),
   routes,
 })
 
-/* =========================================================
- * グローバルガード登録
- * - ⚠️ auth(store) はここではまだ undefined
- * - safe guard（auth が undefined でも落ちない）なので OK
- * - 実際に auth 判定が動くのは app.js で restore 後
- * ======================================================= */
-setupAuthGuards(router)
-
-/* =========================================================
- * Export
- * ======================================================= */
 export default router

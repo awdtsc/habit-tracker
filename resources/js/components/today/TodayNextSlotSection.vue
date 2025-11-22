@@ -2,7 +2,7 @@
 <template>
   <section v-if="items.length" class="space-y-2">
     <h2 class="text-sm font-semibold text-gray-700">
-      次の時間帯（{{ nextSlotText }}）
+      次の時間帯（{{ nextSlotLabel }}）
     </h2>
 
     <div class="rounded-2xl border bg-white divide-y">
@@ -22,20 +22,13 @@
 </template>
 
 <script setup>
-import { computed, unref } from 'vue'
+import { computed } from 'vue'
 import HabitRow from '@/components/today/HabitRow.vue'
-
-/*
-  nextSlot は実際は:
-    - null
-    - 'evening'
-    - { slot: 'evening', label: '夕方', ... }   ← これが来てる
-*/
 
 const props = defineProps({
   nextSlot: {
-    type: [String, Object, null],   // ← ここが正解
-    default: null,
+    type: Number,
+    default: null,   // v2: slot は「整数」
   },
   items: {
     type: Array,
@@ -47,21 +40,14 @@ const props = defineProps({
   },
 })
 
-/* ----------------------------------------------
- * UI 表示用のテキスト整形
- * ---------------------------------------------- */
-const nextSlotText = computed(() => {
-  const v = unref(props.nextSlot)
+const SLOT_LABEL = {
+  1: '朝',
+  2: '昼',
+  3: '夕',
+  4: '夜'
+}
 
-  if (!v) return '未定'
-
-  // string の場合（"morning" etc）そのまま
-  if (typeof v === 'string') return v
-
-  // object の場合（slot / label のセットなど）
-  if (typeof v === 'object' && v.label) return v.label
-  if (typeof v === 'object' && v.slot) return v.slot
-
-  return '未定'
+const nextSlotLabel = computed(() => {
+  return SLOT_LABEL[props.nextSlot] ?? '未定'
 })
 </script>

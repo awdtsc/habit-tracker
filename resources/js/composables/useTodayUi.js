@@ -1,54 +1,79 @@
 // resources/js/composables/useTodayUi.js
 import { computed, watch } from 'vue'
 
-/** UI ストアを安全に初期化して、常に shape が揃っている状態にする */
+/**
+ * v2 TodayTab に完全対応した UI 初期化
+ *
+ * timeslot の値を以下に統一する：
+ *   'auto'         → 自動
+ *   'all'          → すべて
+ *   '1' | '2' | '3' | '4' → 朝/昼/夕/夜
+ */
 export function initUiState(ui) {
   ui.state = ui.state || {}
 
-  // フィルタ
+  // ------------------------------
+  // filter
+  // ------------------------------
   if (!ui.state.filter) {
     ui.state.filter = {
-      timeslot: 'auto',      // 'auto' / 'all' / 'morning' など
+      timeslot: 'auto',       // v2標準
       showCompleted: true,
       showAnytime: true,
-      limit: 0,              // 0:制限なし, 1:1件集中
+      limit: 0,
     }
   } else {
-    ui.state.filter.timeslot      ??= 'auto'
+    // v1 の 'morning' / 'noon' などを v2 の数値形式に変換
+    const legacy = ui.state.filter.timeslot
+
+    const map = {
+      morning: '1',
+      noon: '2',
+      evening: '3',
+      night: '4',
+    }
+
+    // legacy 値を変換
+    if (legacy in map) {
+      ui.state.filter.timeslot = map[legacy]
+    }
+
+    // fallback
+    ui.state.filter.timeslot ??= 'auto'
     ui.state.filter.showCompleted ??= true
-    ui.state.filter.showAnytime   ??= true
-    ui.state.filter.limit         ??= 0
+    ui.state.filter.showAnytime ??= true
+    ui.state.filter.limit ??= 0
   }
 
-  // 完了リストの折りたたみ
-  ui.state.collapse = ui.state.collapse || { done: false }
+  // ------------------------------
+  // collapse
+  // ------------------------------
+  ui.state.collapse = ui.state.collapse || {}
   ui.state.collapse.done ??= false
 
-  // 自動タブ解決用
-  if (ui.state.resolvedTimeslot == null) {
-    ui.state.resolvedTimeslot = 'morning'
-  }
+  // ------------------------------
+  // focus
+  // ------------------------------
+  ui.state.focusedByHabit ??= {}
+  ui.state.focusedAppliedDate ??= null
 
-  // フォーカス系
-  ui.state.focusedByHabit      = ui.state.focusedByHabit      || {}
-  ui.state.focusedAppliedDate  = ui.state.focusedAppliedDate  || null
-
-  // スヌーズ・ストリークリスクなど
-  ui.state.snoozedByHabit      = ui.state.snoozedByHabit      || {}
-  ui.state.streakRiskByHabit   = ui.state.streakRiskByHabit   || {}
+  // optional: snooze / streak
+  ui.state.snoozedByHabit ??= {}
+  ui.state.streakRiskByHabit ??= {}
 
   return ui.state
 }
 
-/** フォーカス状態を扱う小さなサブモジュール */
+/**
+ * フォーカス
+ */
 export function createFocusState(ui, serverDateRef) {
-  // initUiState の中で shape は保証されている前提
   const focusedByHabit = computed({
     get: () => ui.state.focusedByHabit,
-    set: v => (ui.state.focusedByHabit = v || {})
+    set: v => (ui.state.focusedByHabit = v || {}),
   })
 
-  // 日付が変わったら自動クリア
+  // 日付が変わったらフォーカスクリア
   watch(
     () => serverDateRef.value,
     (d) => {
@@ -72,7 +97,6 @@ export function createFocusState(ui, serverDateRef) {
   }
 
   function toggleCollapseDone() {
-    ui.state.collapse = ui.state.collapse || { done: false }
     ui.state.collapse.done = !ui.state.collapse.done
   }
 
