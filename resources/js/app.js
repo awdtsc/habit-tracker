@@ -12,7 +12,7 @@ import axios from 'axios'
 import { waitForBackendAlive, renderOfflineScreen } from './startup/offline'
 import { fetchCsrfCookie, setupAxiosInterceptor } from './startup/backend'
 
-// Alpine
+// Alpine init
 window.Alpine = Alpine
 Alpine.start()
 
@@ -22,7 +22,7 @@ axios.defaults.withCredentials = true
 ;(async () => {
 
   /* ---------------------------------------------
-   * 0. axios interceptor（401 → event）
+   * 0. Axios interceptor（401 → event）
    * ------------------------------------------- */
   setupAxiosInterceptor()
 
@@ -49,28 +49,27 @@ axios.defaults.withCredentials = true
   if (!el) return
 
   /* ---------------------------------------------
-   * 4. Vue / Pinia（router 前）
+   * 4. Vue / Pinia
    * ------------------------------------------- */
-  const app = createApp(App)
+  const app   = createApp(App)
   const pinia = createPinia()
   app.use(pinia)
 
   /* ---------------------------------------------
-   * 5. Stores（auth / board）
-   *    ※ Pinia が use された後に import
+   * 5. Stores
    * ------------------------------------------- */
-  const { useAuthStore } = await import('./stores/auth')
-  const { useHabitBoard } = await import('./stores/useHabitBoard')
+  const { useAuthStore }        = await import('./stores/auth')
+  const { useHabitBoardStore }  = await import('./stores/habitBoard/store')
 
-  const auth = useAuthStore()
-  const board = useHabitBoard()
+  const auth  = useAuthStore()
+  const board = useHabitBoardStore()
 
-  // Debug expose
+  // Debug
   if (typeof window !== 'undefined') {
-    window.useAuthStore = useAuthStore
-    window.useHabitBoard = useHabitBoard
-    window.__auth = auth
+    window.__auth  = auth
     window.__board = board
+    window.useAuthStore = useAuthStore
+    window.useHabitBoardStore = useHabitBoardStore
   }
 
   /* ---------------------------------------------
@@ -86,13 +85,14 @@ axios.defaults.withCredentials = true
   /* ---------------------------------------------
    * 7. Auth Guards（restore 後）
    * ------------------------------------------- */
-  const { injectAuthStore, setupAuthGuards } = await import('./startup/auth-guards')
+  const { injectAuthStore, setupAuthGuards } =
+    await import('./startup/auth-guards')
 
   injectAuthStore(auth)
   setupAuthGuards(router)
 
   /* ---------------------------------------------
-   * 8. router 登録 → mount
+   * 8. mount
    * ------------------------------------------- */
   app.use(router)
   await router.isReady()

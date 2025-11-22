@@ -1,136 +1,87 @@
 // resources/js/composables/useTodayState.js
 //------------------------------------------------------------
-// v2 専用 Today State（v1 ロジック完全排除版）
+// ミニマル Today State（v3）
+//   - 依存ゼロ
+//   - store.todayVM のみを使う
+//   - fetchToday() も store に一本化
 //------------------------------------------------------------
 
 import { ref, computed } from 'vue'
-
-import { useUiState } from '@/stores/uiState'
-import { useHabitBoardStore } from '@/stores/habitBoard'
-import * as habitBoardApi from '@/stores/habitBoard/api'
-import { selectTodayViewModel } from '@/stores/habitBoard/selectors'
-
-import { initUiState, createFocusState } from './useTodayUi'
-import { useTodayActions } from './today/useTodayActions'
-
+import { useHabitBoardStore } from '@/stores/habitBoard/store'
 
 export function useTodayState() {
 
-  /* ------------------------------------------------------------
-   * 0. UI（タブ・フィルタ・スロット）
-   * ---------------------------------------------------------- */
-  const ui = useUiState()
-  initUiState(ui)
-
-
-  /* ------------------------------------------------------------
-   * 1. Board（log 更新などで利用）
-   * ---------------------------------------------------------- */
+  //------------------------------------------------------------
+  // 1. Store（唯一の依存先）
+  //------------------------------------------------------------
   const board = useHabitBoardStore()
 
-
-  /* ------------------------------------------------------------
-   * 2. /api/today のデータ
-   * ---------------------------------------------------------- */
+  //------------------------------------------------------------
+  // 2. ローカル状態
+  //------------------------------------------------------------
   const loading = ref(false)
   const loaded  = ref(false)
 
-  const todayRaw = ref(null)  // /api/today の生データ
-  const vm       = ref(null)  // selectors.js が返す正規 ViewModel
-
-
-  async function fetchToday() {
+  //------------------------------------------------------------
+  // 3. 今日のデータをロード（store を利用）
+  //------------------------------------------------------------
+  async function load() {
     loading.value = true
     try {
-      //--------------------------------------------------------
-      // /api/today を取得
-      //--------------------------------------------------------
-      const data = await habitBoardApi.apiFetchToday()
-      todayRaw.value = data
-
-      //--------------------------------------------------------
-      // selectors.js の VM に一本化
-      //--------------------------------------------------------
-      vm.value = selectTodayViewModel({
-        planned : data?.planned ?? [],
-        date    : data?.date ?? '',
-        nowSlot : data?.now_slot ?? null,
-      })
-
+      await board.fetchToday()
       loaded.value = true
-
     } finally {
       loading.value = false
     }
   }
 
+  //------------------------------------------------------------
+  // 4. VM / planned / date / progress などを store から引き出す
+  //------------------------------------------------------------
+  const vm              = computed(() => board.todayVM)
+  const planned         = computed(() => board.todayPlanned)
+  const todayYmd        = computed(() => board.todayDate)
+  const nowSlot         = computed(() => board.nowSlot)
 
-  /* ------------------------------------------------------------
-   * 3. Focus 状態
-   * ---------------------------------------------------------- */
-  const focus = createFocusState(ui, () => todayRaw.value?.date)
+  const bySlot          = computed(() => vm.value?.bySlot ?? {})
+  const actionable      = computed(() => vm.value?.actionable ?? [])
+  const done            = computed(() => vm.value?.done ?? [])
+  const nextSlot        = computed(() => vm.value?.nextSlot ?? null)
+  const topPick         = computed(() => vm.value?.topPick ?? null)
+  const progress         = computed(() => vm.value?.progress ?? { total:0, completed:0, rate:0 })
 
+  //------------------------------------------------------------
+  // 5. Toggle も store の toggleLog() を直接使う
+  //------------------------------------------------------------
+  async function toggle(payload) {
+    return await board.toggleLog(payload)
+  }
 
-  /* ------------------------------------------------------------
-   * 4. Toggle / Rating / Snooze など Today アクション
-   * ---------------------------------------------------------- */
-  const actions = useTodayActions(
-    board,
-
-    // items = VM の items（v2 本流）
-    computed(() => vm.value?.items ?? []),
-
-    // その日の date（YYYY-MM-DD）
-    computed(() => todayRaw.value?.date ?? ''),
-
-    ui,
-
-    // topPick（おすすめ習慣）
-    computed(() => vm.value?.topPick ?? null),
-  )
-
-
-  /* ------------------------------------------------------------
-   * 5. Export
-   * ---------------------------------------------------------- */
+  //------------------------------------------------------------
+  // 6. Export — TodayTab.vue がこれを使うだけ
+  //------------------------------------------------------------
   return {
-    ui,
-    board,
-
+    // 状態
     loading,
     loaded,
-    fetchToday,
 
-    todayRaw,
+    // 読み込み
+    load,
+
+    // 値
     vm,
+    planned,
+    todayYmd,
+    nowSlot,
+    bySlot,
+    actionable,
+    done,
+    nextSlot,
+    topPick,
+    progress,
 
-    // Focus
-    ...focus,
-
-    // Actions
-    ...actions,
-
-    // 日付
-    todayYmd: computed(() => todayRaw.value?.date ?? ''),
-
-    // v2 VM の items（= planned）
-    plannedHabits: computed(() => vm.value?.items ?? []),
-
-    // slot grouping（selectors 由来）
-    bySlot: computed(() => vm.value?.bySlot ?? {}),
-
-    // actionable / done
-    actionable: computed(() => vm.value?.actionable ?? []),
-    done:       computed(() => vm.value?.done ?? []),
-
-    // next slot
-    nextSlot: computed(() => vm.value?.nextSlot ?? null),
-
-    // top pick
-    topPick: computed(() => vm.value?.topPick ?? null),
-
-    // progress { total, completed, rate }
-    progress: computed(() => vm.value?.progress ?? { total: 0, completed: 0, rate: 0 }),
+    // 操作
+    toggle,
   }
 }
 
