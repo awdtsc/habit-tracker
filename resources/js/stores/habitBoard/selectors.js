@@ -14,20 +14,21 @@ export function buildTodayViewModel({
 }) {
   const rows = Array.isArray(planned) ? planned : []
 
-  // 返り値の器
   const items = []
   const actionable = []
   const done = []
 
   const bySlot = {
-    0: [], 1: [], 2: [], 3: [], 4: []
+    0: { actionable: [], done: [] },
+    1: { actionable: [], done: [] },
+    2: { actionable: [], done: [] },
+    3: { actionable: [], done: [] },
+    4: { actionable: [], done: [] },
   }
 
   let completed = 0
   let total = 0
 
-  // nextSlot 用
-  const slotHasHabit = { 1: false, 2: false, 3: false, 4: false }
   let topPick = null
   let topPickSlot = Infinity
   let topPickId = Infinity
@@ -36,11 +37,9 @@ export function buildTodayViewModel({
     const h = row.h || {}
     const id = Number(h.id)
 
-    // slot 正規化 (今日の row.today_log の fallback も含む)
     const rawSlot = h.time_slot ?? row.today_log?.time_slot ?? 0
     const slotNum = toSlotNum(rawSlot)
 
-    // log を取得
     const fromStore = typeof getLog === 'function'
       ? getLog(id, date, slotNum)
       : null
@@ -50,48 +49,36 @@ export function buildTodayViewModel({
     const item = { h: { ...h, id, time_slot: slotNum }, log }
 
     items.push(item)
-    bySlot[slotNum].push(item)
 
     total++
 
-    // 完了/未完で分類
     const isDone = log?.status === 'done'
     if (isDone) {
       done.push(item)
       completed++
+      bySlot[slotNum]?.done.push(item)
     } else {
       actionable.push(item)
+      bySlot[slotNum]?.actionable.push(item)
 
-      // topPick の最適化（slot → id の最小を取る）
+      // topPick: 最も早いスロット & ID の小さいもの
       if (slotNum < topPickSlot || (slotNum === topPickSlot && id < topPickId)) {
         topPick = item
         topPickSlot = slotNum
         topPickId = id
       }
     }
-
-    // nextSlot チェック用：その slot に何かあるか
-    if (slotNum >= 1 && slotNum <= 4) {
-      slotHasHabit[slotNum] = true
-    }
   }
 
-  // 達成率
   const progress = {
     total,
     completed,
+    done: completed,
     rate: total === 0 ? 0 : completed / total,
   }
 
-  // nextSlot 計算（nowSlot の次のスロットで習慣があるところ）
-  const sNow = Number(nowSlot ?? 1)
-  let nextSlot = null
-  for (let s = sNow + 1; s <= 4; s++) {
-    if (slotHasHabit[s]) {
-      nextSlot = s
-      break
-    }
-  }
+  // nowSlot は AUTO 用のデフォルト値として保持（手動切替はコンポーネント側で計算）
+  const normalizedNowSlot = Number(nowSlot ?? 0) || null
 
   return {
     items,
@@ -99,7 +86,7 @@ export function buildTodayViewModel({
     done,
     bySlot,
     progress,
-    nextSlot,
+    nextSlot: normalizedNowSlot,
     topPick,
   }
 }

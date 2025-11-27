@@ -7,18 +7,52 @@
 
 import { defineStore } from 'pinia'
 import * as api from './api.js'
+import { buildTodayViewModel } from './selectors'
+import { toSlotNum } from '@/domain/timeutil'
 
 /* ------------------------------------------------------------
  * 共通ユーティリティ
  * ---------------------------------------------------------- */
 const makeKey = (id, date, slot) => `${id}_${date}_${slot}`
+const keyFor = (id, date, slot) => makeKey(Number(id), date, toSlotNum(slot))
 
 const normalizeChecks = (logs = []) => {
   const out = {}
   for (const log of logs) {
-    out[makeKey(log.habit_id, log.date, log.time_slot)] = log
+    const key = keyFor(log.habit_id, log.date, log.time_slot)
+    out[key] = { ...log, time_slot: toSlotNum(log.time_slot) }
   }
   return out
+}
+
+const emptyView = () => ({
+  items: [],
+  actionable: [],
+  done: [],
+  bySlot: { 0: [], 1: [], 2: [], 3: [], 4: [] },
+  progress: { total: 0, completed: 0, done: 0, rate: 0 },
+  nextSlot: null,
+  topPick: null,
+})
+
+const normalizeLog = (raw, ctx = {}) => {
+  if (!raw) return null
+  const habitId = Number(raw.habit_id ?? ctx.habit_id)
+  const date     = raw.date ?? ctx.date
+  if (!habitId || !date) return null
+
+  const slot = toSlotNum(raw.time_slot ?? ctx.time_slot ?? 0)
+  const status = raw.status ?? (raw.value ? 'done' : 'none')
+
+  return {
+    habit_id : habitId,
+    date,
+    time_slot: slot,
+    status,
+    rating   : raw.rating ?? null,
+    value    : raw.value ?? null,
+    updated_at: raw.updated_at ?? raw.checked_at ?? null,
+  }
 }
 
 /* ------------------------------------------------------------
@@ -31,6 +65,8 @@ export const useHabitBoardStore = defineStore('habitBoard', {
     nowSlot: null,               // 1〜4（0=anytime は使用しない）
     todayPlanned: [],            // [{ h, today_log, pending_task }]
     todayLogs: {},               // { "id_date_slot": {…} }
+    todayView: emptyView(),
+    todayLoaded: false,
 
     /* ------------------ Weekly ----------------- */
     weekStart: null,
@@ -48,43 +84,11 @@ export const useHabitBoardStore = defineStore('habitBoard', {
   getters: {
     /* Today / Weekly 共通ログ取得 */
     getLog: (state) => (id, date, slot) =>
-      state.todayLogs[makeKey(id, date, slot)] || null,
+      state.todayLogs[keyFor(id, date, slot)] || null,
 
     /* Today View Model（画面向け整形データ） */
     todayVM(state) {
-      const vm = {
-        actionable: [],
-        done: [],
-        bySlot: {
-          1: { actionable: [], done: [] },
-          2: { actionable: [], done: [] },
-          3: { actionable: [], done: [] },
-          4: { actionable: [], done: [] },
-        },
-      }
-
-      for (const p of state.todayPlanned ?? []) {
-        const h = p.h
-        if (!h) continue
-
-        const log = p.today_log ?? null
-        const slot = h.time_slot ?? null
-        const item = { h, log }
-        const isDone = log?.status === 'done'
-
-        // ALL モード集計
-        ;(isDone ? vm.done : vm.actionable).push(item)
-
-        // slot=1〜4 の場合のみスロット振分
-        if (slot && vm.bySlot[slot]) {
-          ;(isDone
-            ? vm.bySlot[slot].done
-            : vm.bySlot[slot].actionable
-          ).push(item)
-        }
-      }
-
-      return vm
+      return state.todayView
     },
   },
 
@@ -92,6 +96,23 @@ export const useHabitBoardStore = defineStore('habitBoard', {
    * Actions（API） 
    * ---------------------------------------------------------- */
   actions: {
+    applyLogUpdate(log) {
+      if (!log) return
+
+      this.todayLogs[keyFor(log.habit_id, log.date, log.time_slot)] = log
+
+      const idx = this.todayPlanned.findIndex(p => Number(p?.h?.id) === log.habit_id)
+      if (idx >= 0) {
+        const row = this.todayPlanned[idx]
+        const updatedHabit = { ...row.h, time_slot: toSlotNum(row?.h?.time_slot ?? log.time_slot) }
+        this.todayPlanned.splice(idx, 1, {
+          ...row,
+          h: updatedHabit,
+          today_log: log,
+        })
+      }
+    },
+
     /* 今日のデータ取得 */
     async fetchToday() {
       this.loading = true
@@ -99,25 +120,26 @@ export const useHabitBoardStore = defineStore('habitBoard', {
         const data = await api.apiFetchToday()
 
         this.todayDate = data.date
-        this.nowSlot   = data.now_slot ?? null
-        this.todayPlanned = data.planned ?? []
+        this.nowSlot   = toSlotNum(data.now_slot ?? data.current_slot ?? null) || null
 
-        // todayLogs（flat logs）
+        this.todayPlanned = (data.planned ?? []).map(p => {
+          const slot = toSlotNum(p?.h?.time_slot ?? p?.today_log?.time_slot ?? 0)
+          const log  = normalizeLog(p.today_log, { habit_id: p?.h?.id, date: data.date, time_slot: slot })
+          return {
+            ...p,
+            h: { ...p.h, time_slot: slot },
+            today_log: log,
+          }
+        })
+
         const logs = []
         for (const p of this.todayPlanned) {
-          const l = p.today_log
-          if (!l) continue
-          logs.push({
-            habit_id : p.h.id,
-            date     : l.date,
-            time_slot: l.time_slot,
-            status   : l.status,
-            rating   : l.rating,
-            updated_at: l.updated_at,
-          })
+          if (p.today_log) logs.push(p.today_log)
         }
         this.todayLogs = normalizeChecks(logs)
 
+        this.rebuildTodayView()
+        this.todayLoaded = true
         this.lastFetchedAt = Date.now()
       }
       finally {
@@ -141,33 +163,38 @@ export const useHabitBoardStore = defineStore('habitBoard', {
     },
 
     /* ログのトグル（Today） */
+    rebuildTodayView() {
+      this.todayView = buildTodayViewModel({
+        planned: this.todayPlanned,
+        getLog: this.getLog,
+        date: this.todayDate,
+        nowSlot: this.nowSlot,
+      })
+    },
+
     async toggleLog(raw) {
       const payload = {
         habit_id : raw.habit_id ?? raw.id,
-        date     : raw.date,
+        date     : raw.date ?? this.todayDate,
         time_slot: raw.time_slot,
         value    : raw.value ?? null,
         rating   : raw.rating ?? null,
         status   : raw.status ?? null,
       }
 
-      console.log('[toggleLog payload]', payload)
+      // 即時反映（オプティミスティック）
+      const optimistic = normalizeLog({ ...payload, updated_at: new Date().toISOString() }, payload)
+      if (optimistic) {
+        this.applyLogUpdate(optimistic)
+        this.rebuildTodayView()
+      }
 
       const res = await api.apiToggleHabitLog(payload)
 
-      if (res.ok) {
-        this.todayLogs[makeKey(res.habit_id, res.date, res.time_slot)] = {
-          habit_id : res.habit_id,
-          date     : res.date,
-          time_slot: res.time_slot,
-          status   : res.status,
-          rating   : res.rating ?? null,
-          updated_at: res.updated_at,
-        }
-      }
-
-      if (this.todayDate) {
-        await this.fetchToday()
+      const log = normalizeLog(res, payload)
+      if (log) {
+        this.applyLogUpdate(log)
+        this.rebuildTodayView()
       }
 
       return res

@@ -12,6 +12,8 @@ import TodayTopPickCard from '@/components/today/TodayTopPickCard.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useWeeklyBoard } from '@/stores/useWeeklyBoard'
 import { useTodayState } from '@/composables/useTodayState'
+import { slotLabelFor } from '@/domain/timeutil'
+import { useUiState } from '@/stores/uiState'
 
 
 // ==========================================================
@@ -28,6 +30,7 @@ if (typeof window !== 'undefined') window.__today = core
 // ==========================================================
 const auth = useAuthStore()
 const weekly = useWeeklyBoard()
+const ui = useUiState()
 
 onMounted(async () => {
   await auth.waitUntilReady()
@@ -39,18 +42,6 @@ onMounted(async () => {
 
 
 // ==========================================================
-// Slot label helper
-// ==========================================================
-function slotLabelFor(s) {
-  return {
-    1: '朝',
-    2: '昼',
-    3: '夕',
-    4: '夜',
-  }[s] ?? ''
-}
-
-
 // ==========================================================
 // Mode（auto / slot / all）
 // ==========================================================
@@ -62,6 +53,11 @@ const mode = computed(() => {
 
 const activeSlot = computed(() => core.activeSlot.value)
 
+const topPickSlotLabel = computed(() => slotLabelFor(core.topPick.value?.h?.time_slot))
+
+const limitOne = computed(() => ui.state.filter.limit === 1)
+const showCompleted = computed(() => ui.state.filter.showCompleted !== false)
+
 
 // ==========================================================
 // Lists
@@ -70,23 +66,22 @@ const activeSlot = computed(() => core.activeSlot.value)
 // slot → {actionable, done}
 const slotLists = computed(() => core.slots.value ?? {})
 
+const applyLimit = (list = []) => (limitOne.value ? list.slice(0, 1) : list)
+
 const slotActionable = computed(() => {
-  return slotLists.value[activeSlot.value]?.actionable ?? []
+  return applyLimit(slotLists.value[activeSlot.value]?.actionable ?? [])
 })
 
 const slotDone = computed(() => {
   return slotLists.value[activeSlot.value]?.done ?? []
 })
 
-const allActionable = computed(() => core.actionable.value ?? [])
+const allActionable = computed(() => applyLimit(core.actionable.value ?? []))
 const allDone       = computed(() => core.done.value ?? [])
 
 // next slot
 const nextSlot = computed(() => core.nextSlot.value)
-const nextSlotItems = computed(() => {
-  if (!nextSlot.value) return []
-  return slotLists.value[nextSlot.value]?.actionable ?? []
-})
+const nextSlotItems = computed(() => core.nextSlotItems.value ?? [])
 
 
 // ==========================================================
@@ -130,7 +125,7 @@ function goDetail(id) {
     <TodayTopPickCard
       v-if="core.topPick"
       :top-pick="core.topPick"
-      :timeslot-label="slotLabelFor(core.activeSlot)"
+      :timeslot-label="topPickSlotLabel"
       :on-row-update="onRowUpdate"
     />
 
@@ -152,6 +147,7 @@ function goDetail(id) {
 
       <!-- 完了 -->
       <TodayDoneSection
+        v-if="showCompleted"
         :items="allDone"
         :show-completed="true"
         :collapsed="false"
@@ -178,6 +174,7 @@ function goDetail(id) {
 
       <!-- 完了 -->
       <TodayDoneSection
+        v-if="showCompleted"
         :items="slotDone"
         :show-completed="true"
         :collapsed="false"
@@ -211,6 +208,7 @@ function goDetail(id) {
 
       <!-- 完了 -->
       <TodayDoneSection
+        v-if="showCompleted"
         :items="slotDone"
         :show-completed="true"
         :collapsed="false"

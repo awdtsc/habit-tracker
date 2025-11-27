@@ -26,8 +26,9 @@ export function toSlotNum(v) {
   // 数値系（"2" など文字列数値も含む）
   const n = Number(v);
   if (!Number.isNaN(n)) {
-    // 0〜4 の範囲に丸める
-    return Math.min(Math.max(n, 0), 4);
+    // 0〜4 の範囲に丸めて整数化
+    const rounded = Math.round(n)
+    return Math.min(Math.max(rounded, 0), 4);
   }
 
   // 文字列系
