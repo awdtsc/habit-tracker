@@ -4,6 +4,7 @@
 //------------------------------------------------------------
 import { ref, computed } from 'vue'
 import { useHabitBoardStore } from '@/stores/habitBoard/store'
+import { toSlotNum } from '@/domain/timeutil'
 
 export function useTodayState() {
 
@@ -11,17 +12,18 @@ export function useTodayState() {
   const getBoard = () => (board ??= useHabitBoardStore())
 
   const loading = ref(false)
-  const loaded  = ref(false)
+
+  const loaded = computed(() => getBoard().todayLoaded ?? false)
 
   // ----------------------------------------------------------
   // 初回ロード（toggle後には呼ばない）
   // ----------------------------------------------------------
-  async function load() {
+  async function load(force = false) {
+    if (loaded.value && !force) return
     const b = getBoard()
     loading.value = true
     try {
       await b.fetchToday()
-      loaded.value = true
     } finally {
       loading.value = false
     }
@@ -40,39 +42,14 @@ export function useTodayState() {
   const slots      = computed(() => vm.value.bySlot ?? {})
 
   // ----------------------------------------------------------
-  // progress
+  // progress（store 側で前計算された値を利用）
   // ----------------------------------------------------------
-  const progress = computed(() => {
-    const total = planned.value.length
-    const doneCount = done.value.length
-    return {
-      total,
-      done: doneCount,
-      rate: total === 0 ? 0 : Math.round((doneCount / total) * 100),
-    }
-  })
+  const progress = computed(() => vm.value.progress ?? { total: 0, completed: 0, done: 0, rate: 0 })
 
   // ----------------------------------------------------------
-  // topPick
+  // topPick（store 前計算済み）
   // ----------------------------------------------------------
-  const topPick = computed(() => {
-    return actionable.value.length ? actionable.value[0] : null
-  })
-
-  // ----------------------------------------------------------
-  // nextSlot
-  // ----------------------------------------------------------
-  const nextSlot = computed(() => {
-    const now = nowSlot.value
-    if (!now || now < 1 || now > 4) return null
-
-    for (let s = now + 1; s <= 4; s++) {
-      if (slots.value[s] && slots.value[s].actionable.length > 0) {
-        return s
-      }
-    }
-    return null
-  })
+  const topPick = computed(() => vm.value.topPick ?? null)
 
   // ----------------------------------------------------------
   // Auto / Manual Slot
@@ -93,6 +70,28 @@ export function useTodayState() {
   function disableAuto() {
     autoMode.value = false
   }
+
+  const activeSlotNum = computed(() => {
+    const raw = autoMode.value ? nowSlot.value : selectedSlot.value
+    const num = toSlotNum(raw)
+    return num >= 1 && num <= 4 ? num : null
+  })
+
+  // ----------------------------------------------------------
+  // nextSlot（AUTO と SLOT モードでのみ使用）
+  // ----------------------------------------------------------
+  const nextSlot = computed(() => {
+    const base = activeSlotNum.value
+    if (!base) return null
+    if (base >= 4) return null
+    return base + 1
+  })
+
+  const nextSlotItems = computed(() => {
+    const ns = nextSlot.value
+    if (!ns) return []
+    return slots.value?.[ns]?.actionable ?? []
+  })
 
   // ----------------------------------------------------------
   // toggle（完了 → 完了セクションへ移動）
@@ -115,13 +114,7 @@ export function useTodayState() {
       status   : status ?? undefined,
     }
 
-    // ★ API 呼び出し & store 内部ライブ更新
     await b.toggleLog(payload)
-
-    // ★ load() を呼ばない（ここが重要）
-    // → ライブ更新された todayLogs & todayPlanned によって
-    //    todayVM が即座に再計算される
-    // → 完了した習慣がすぐ done[] に入る
   }
 
   const core = {
@@ -137,9 +130,11 @@ export function useTodayState() {
     progress,
     topPick,
     nextSlot,
+    nextSlotItems,
     autoMode,
     selectedSlot,
     activeSlot,
+    activeSlotNum,
     enableAuto,
     disableAuto,
     toggle,

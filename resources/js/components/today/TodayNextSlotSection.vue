@@ -28,6 +28,7 @@
 <script setup>
 import { computed } from 'vue'
 import HabitRow from '@/components/today/HabitRow.vue'
+import { slotLabelFor } from '@/domain/timeutil'
 
 const props = defineProps({
   nextSlot: {
@@ -44,12 +45,6 @@ const props = defineProps({
   },
 })
 
-const SLOT_LABEL = {
-  1: '朝',
-  2: '昼',
-  3: '夕',
-  4: '夜',
-}
-
-const nextSlotLabel = computed(() => SLOT_LABEL[props.nextSlot] ?? '未定')
+const nextSlotLabel = computed(() => slotLabelFor(props.nextSlot) ?? '未定')
 </script>
+
