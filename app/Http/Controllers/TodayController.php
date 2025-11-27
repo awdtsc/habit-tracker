@@ -13,42 +13,63 @@ class TodayController extends Controller
     {
         $user = $request->user();
 
+        // ----------------------------------------------------
         // タイムゾーン
+        // ----------------------------------------------------
         $tz    = $user->timezone ?? config('app.timezone', 'Asia/Tokyo');
         $today = Carbon::now($tz)->startOfDay();
         $now   = Carbon::now($tz);
 
-        // 今日のログ & pending
-        $habits = Habit::with([
-            'logs' => function ($q) use ($today) {
-                $q->whereDate('date', $today->toDateString())
-                  ->orderByDesc('id');
-            },
-            'logs.remindTasks' => function ($q) use ($now) {
-                $q->where('status', 'pending')
-                  ->where('remind_at', '>', $now)
-                  ->orderBy('remind_at', 'asc');
-            },
-            'times',
-        ])
-        ->where('user_id', $user->id)
-        ->orderBy('id')
-        ->get();
+        $dateStr = $today->toDateString();
+
+        // ----------------------------------------------------
+        // 今日の Habit と HabitLog を読み込む
+        // ----------------------------------------------------
+        $habits = Habit::where('user_id', $user->id)
+            ->orderBy('id')
+            ->get();
+
+        // 今日の logs（date = today）を1回のクエリで取得（最適）
+        $logs = HabitLog::where('user_id', $user->id)
+            ->whereDate('date', $dateStr)
+            ->orderByDesc('id')
+            ->get()
+            ->groupBy('habit_id');
 
         $items = [];
         $doneCount = 0;
 
+        // ----------------------------------------------------
+        // 各 Habit ごとに item を組み立てる
+        // ----------------------------------------------------
         foreach ($habits as $h) {
 
-            $todayLog = $h->logs->first();
-            $status   = $todayLog?->status ?? 'none';
+            // 今日のログ（最新を使用）
+            $todayLogs = $logs[$h->id] ?? collect();
+            $log = $todayLogs->first();
 
+            // status
+            $status = $log?->status ?? 'none';
             if ($status === 'done') {
                 $doneCount++;
             }
 
-            $pending = $todayLog?->remindTasks?->first();
+            // pending remind_task（pending の中で一番近い future）
+            $pending = null;
+            if ($log) {
+                $pending = $log->remindTasks()
+                    ->where('status', 'pending')
+                    ->where('remind_at', '>', $now)
+                    ->orderBy('remind_at', 'asc')
+                    ->first();
+            }
 
+            // フロントが期待する shape:
+            // {
+            //   h: {...},
+            //   log: {...},   ← today_log ではなく log
+            //   pending_task: {...}
+            // }
             $items[] = [
                 'h' => [
                     'id'         => $h->id,
@@ -57,16 +78,22 @@ class TodayController extends Controller
                     'time_slot'  => (int)($h->time_slot ?? 0),
                     'category'   => $h->category,
                     'color_tag'  => $h->color_tag,
-                    'evaluation' => $h->evaluation_type,
+                    'evaluation_type' => $h->evaluation_type,
                 ],
-                'today_log' => $todayLog ? [
-                    'id'         => $todayLog->id,
-                    'status'     => $todayLog->status,
-                    'rating'     => $todayLog->rating,
-                    'time_slot'  => (int)($todayLog->time_slot ?? 0),
-                    'date'       => optional($todayLog->date)?->toDateString(),
-                    'updated_at' => optional($todayLog->updated_at)?->toIso8601String(),
+
+                // 今日の HabitLog
+                'log' => $log ? [
+                    'id'         => $log->id,
+                    'status'     => $log->status,
+                    'rating'     => $log->rating,
+                    'value'      => $log->value,
+                    'time_slot'  => (int)($log->time_slot ?? $h->time_slot ?? 0),
+                    'date'       => Carbon::parse($log->date)->toDateString(),
+                    'checked_at' => optional($log->checked_at)?->toIso8601String(),
+                    'updated_at' => optional($log->updated_at)?->toIso8601String(),
                 ] : null,
+
+                // 最も近い pending remind_task
                 'pending_task' => $pending ? [
                     'id'        => $pending->id,
                     'remind_at' => optional($pending->remind_at)?->setTimezone($tz)->toIso8601String(),
@@ -75,7 +102,9 @@ class TodayController extends Controller
             ];
         }
 
-        // pending の中で一番近いもの
+        // ----------------------------------------------------
+        // pending の中で最も近いものを top_pick に
+        // ----------------------------------------------------
         $nearest = collect($items)
             ->filter(fn ($it) => $it['pending_task'] !== null)
             ->sortBy(fn ($it) => $it['pending_task']['remind_at'])
@@ -86,7 +115,9 @@ class TodayController extends Controller
             'remind_task_id' => $nearest['pending_task']['id'],
         ] : null;
 
-        // slot 定義（front と共通）
+        // ----------------------------------------------------
+        // slot definitions（front と共有）
+        // ----------------------------------------------------
         $slotDefs = [
             ['label' => 'anytime', 'code' => 0],
             ['label' => 'morning', 'code' => 1],
@@ -95,36 +126,36 @@ class TodayController extends Controller
             ['label' => 'night',   'code' => 4],
         ];
 
-        /**
-         * === 新しい now_slot 判定 ===
-         *
-         * 00:00–04:59  → night (4)
-         * 05:00–10:59  → morning (1)
-         * 11:00–15:59  → noon (2)
-         * 16:00–19:59  → evening (3)
-         * 20:00–23:59  → night (4)
-         */
-        $minutes = ((int)$now->format('H')) * 60 + (int)$now->format('i');
+        // ----------------------------------------------------
+        // 現在 slot（あなたのロジックをそのまま採用）
+        // ----------------------------------------------------
+        $minutes = $now->hour * 60 + $now->minute;
 
         if ($minutes < 5 * 60) {
-            $nowSlot = 4;
+            $nowSlot = 4;               // 00:00〜04:59
         } elseif ($minutes < 11 * 60) {
-            $nowSlot = 1;
+            $nowSlot = 1;               // 05:00〜10:59
         } elseif ($minutes < 16 * 60) {
-            $nowSlot = 2;
+            $nowSlot = 2;               // 11:00〜15:59
         } elseif ($minutes < 20 * 60) {
-            $nowSlot = 3;
+            $nowSlot = 3;               // 16:00〜19:59
         } else {
-            $nowSlot = 4;
+            $nowSlot = 4;               // 20:00〜23:59
         }
 
+        // ----------------------------------------------------
+        // 最終 JSON
+        // ----------------------------------------------------
         return response()->json([
             'planned'  => $items,
+
             'progress' => [
                 'planned_count' => count($items),
                 'done_count'    => $doneCount,
             ],
+
             'top_pick' => $topPick,
+
             'now'      => $now->toDateTimeString(),
             'date'     => $today->toDateString(),
             'timezone' => $tz,

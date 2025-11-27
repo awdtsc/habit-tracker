@@ -9,64 +9,76 @@
         :key="btn.key"
         class="px-3 py-1 rounded-full border text-sm"
         :class="activeClass(btn.key)"
-        @click="setTimeslot(btn.key)"
+        @click="onSelect(btn.key)"
       >
         {{ btn.label }}
       </button>
     </div>
 
     <!-- 現在スロット -->
-    <div class="text-xs text-gray-500">(現在: {{ currentSlotLabel }})</div>
+    <div class="text-xs text-gray-500">
+      (現在: {{ currentSlotLabel }})
+    </div>
 
-    <!-- フィルター類 -->
+    <!-- フィルター -->
     <div class="flex gap-4 items-center ml-auto">
 
       <label class="flex items-center gap-1 text-sm">
-        <input type="checkbox"
-               v-model="ui.state.filter.showAnytime" />
+        <input type="checkbox" v-model="ui.state.filter.showAnytime" />
         いつでも表示
       </label>
 
       <label class="flex items-center gap-1 text-sm">
-        <input type="checkbox"
-               v-model="ui.state.filter.showCompleted" />
+        <input type="checkbox" v-model="ui.state.filter.showCompleted" />
         完了を表示
       </label>
 
       <label class="flex items-center gap-1 text-sm">
-        <input type="checkbox"
-               v-model="ui.state.filter.onlyOneToday" />
+        <input type="checkbox" v-model="ui.state.filter.onlyOneToday" />
         今日一個だけ表示
       </label>
+
     </div>
 
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+/* --------------------------------------------------
+ * inject('today') で TodayState v3 を受け取る
+ * useTodayState() をここで呼んでは絶対にダメ
+ * -------------------------------------------------- */
+import { computed, inject } from 'vue'
 import { useUiState } from '@/stores/uiState'
-import { useTodayState } from '@/composables/useTodayState'
 
 const ui = useUiState()
-const core = useTodayState()
+
+// provide('today', core) が必須
+const core = inject('today')
+if (!core) {
+  console.error('[TodayHeader] <today> not provided')
+}
+
 
 /* --------------------------------------------------
- * 時間帯タブ定義
+ * タブ定義
  * -------------------------------------------------- */
 const SLOT_BTNS = [
-  { key: 'morning', label: '朝' },
-  { key: 'noon',    label: '昼' },
-  { key: 'evening', label: '夕' },
-  { key: 'night',   label: '夜' },
-  { key: 'anytime', label: 'いつでも' },
-  { key: 'all',     label: 'すべて' },
+  { key: 'auto', label: '自動' },
+  { key: 'all',  label: 'すべて' },
+  { key: 1,      label: '朝' },
+  { key: 2,      label: '昼' },
+  { key: 3,      label: '夕' },
+  { key: 4,      label: '夜' },
 ]
 
 /* --------------------------------------------------
- * アクティブ状態
+ * activeKey（現在選択中のタブ）
  * -------------------------------------------------- */
-const activeKey = computed(() => ui.state.filter.timeslot ?? 'all')
+const activeKey = computed(() => {
+  if (core.autoMode.value) return 'auto'
+  return core.selectedSlot.value ?? 'all'
+})
 
 function activeClass(key) {
   return activeKey.value === key
@@ -74,21 +86,39 @@ function activeClass(key) {
     : 'bg-white text-gray-700'
 }
 
+
 /* --------------------------------------------------
- * 現在スロット（安全版）
+ * 現在スロット表示（core.nowSlot）
  * -------------------------------------------------- */
 const SLOT_LABEL = { 1: '朝', 2: '昼', 3: '夕', 4: '夜' }
 
 const currentSlotLabel = computed(() => {
-  const slot = core.serverNowSlot?.value
-  return SLOT_LABEL[slot] ?? '—'
+  return SLOT_LABEL[core.nowSlot.value] ?? '—'
 })
 
+
 /* --------------------------------------------------
- * クリック時
+ * タブ変更処理（v3 正式対応）
  * -------------------------------------------------- */
-function setTimeslot(key) {
-  ui.state.filter.timeslot = key
+function onSelect(key) {
+
+  // AUTO モード
+  if (key === 'auto') {
+    core.enableAuto()
+    return
+  }
+
+  // 手動モードへ切り替え
+  core.disableAuto()
+
+  // "すべて"
+  if (key === 'all') {
+    core.selectedSlot.value = null
+    return
+  }
+
+  // 1〜4 のスロット
+  core.selectedSlot.value = key
 }
 </script>
 

@@ -24,7 +24,7 @@ const DOW_JP = ['月', '火', '水', '木', '金', '土', '日']
 const days = computed(() => weekly.state.days ?? [])
 
 /* ---------------------------------------
- * 日付ごとの「その日に予定がある習慣」リスト
+ * 日付ごとの「予定されている習慣」リスト
  * ------------------------------------- */
 const habitsByDate = computed(() => {
   const map = {}
@@ -54,10 +54,12 @@ function shiftWeek(n) {
 }
 
 /* ---------------------------------------
- * カード色
+ * カード色（slot-aware）
  * ------------------------------------- */
-function cardClass(hid, dateISO) {
-  const st = weekly.getStatus(hid, dateISO)
+function cardClass(h, dateISO) {
+  const slot = Number(h.time_slot)
+  const st = weekly.getStatus(h.id, dateISO, slot)
+
   if (st === 'done') return 'bg-green-500 text-white'
   if (st === 'pending') return 'bg-orange-400 text-white'
   return 'bg-gray-200 text-gray-500'
@@ -78,18 +80,17 @@ function isDisabled(h, dateISO) {
 }
 
 /* ---------------------------------------
- * トグル（習慣 + 日付）
+ * トグル（slot-aware）
  * ------------------------------------- */
 async function onToggle(habit, dateISO) {
-  const slot = Number(habit.time_slot ?? 0)
+  const slot = Number(habit.time_slot)
 
   try {
-    // 1) トグル
+    // 1) トグル（楽観更新）
     await weekly.toggle(habit.id, dateISO, slot)
 
-    // 2) 最新週データを再取得（rates / logs / days すべて更新）
+    // 2) 最新週データを再取得（rates / logs 更新）
     await weekly.fetchWeeklyBoard(weekly.state.week_start)
-
   } catch (e) {
     console.error('[WeeklyBoard] toggle failed', e)
   }
@@ -124,7 +125,7 @@ onMounted(async () => {
       </button>
     </div>
 
-    <!-- PC: 7列が 100% に収まるグリッド -->
+    <!-- PC版: 7列 -->
     <div class="hidden md:grid grid-cols-7 gap-0 rounded-2xl bg-white shadow ring-1 ring-gray-200">
       <div
         v-for="(d, idx) in days"
@@ -145,14 +146,19 @@ onMounted(async () => {
             type="button"
             class="w-full rounded-lg px-3 py-2 text-left text-sm font-medium shadow-sm transition active:scale-[0.97]"
             :class="[
-              cardClass(h.id, d.iso),
+              cardClass(h, d.iso),
               isDisabled(h, d.iso) ? 'opacity-40 pointer-events-none' : ''
             ]"
             @click="onToggle(h, d.iso)"
           >
             <div class="flex items-center justify-between">
               <span>{{ h.title }}</span>
-              <span v-if="weekly.getStatus(h.id, d.iso) === 'done'" class="ml-2 text-xs">✅</span>
+              <span
+                v-if="weekly.getStatus(h.id, d.iso, Number(h.time_slot)) === 'done'"
+                class="ml-2 text-xs"
+              >
+                ✅
+              </span>
             </div>
           </button>
 
@@ -166,7 +172,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- スマホ: 横スクロール版 -->
+    <!-- スマホ版 -->
     <div class="md:hidden rounded-2xl bg-white shadow ring-1 ring-gray-200 overflow-x-auto">
       <div class="flex min-w-max divide-x divide-gray-200">
         <div
@@ -186,14 +192,19 @@ onMounted(async () => {
               type="button"
               class="w-full rounded-lg px-3 py-2 text-left text-sm font-medium shadow-sm transition active:scale-[0.97]"
               :class="[
-                cardClass(h.id, d.iso),
+                cardClass(h, d.iso),
                 isDisabled(h, d.iso) ? 'opacity-40 pointer-events-none' : ''
               ]"
               @click="onToggle(h, d.iso)"
             >
               <div class="flex items-center justify-between">
                 <span>{{ h.title }}</span>
-                <span v-if="weekly.getStatus(h.id, d.iso) === 'done'" class="ml-2 text-xs">✅</span>
+                <span
+                  v-if="weekly.getStatus(h.id, d.iso, Number(h.time_slot)) === 'done'"
+                  class="ml-2 text-xs"
+                >
+                  ✅
+                </span>
               </div>
             </button>
 

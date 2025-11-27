@@ -1,10 +1,13 @@
 <!-- resources/js/components/today/TodayNextSlotSection.vue -->
 <template>
   <section v-if="items.length" class="space-y-2">
+
+    <!-- Header -->
     <h2 class="text-sm font-semibold text-gray-700">
       次の時間帯（{{ nextSlotLabel }}）
     </h2>
 
+    <!-- List -->
     <div class="rounded-2xl border bg-white divide-y">
       <div
         v-for="x in items"
@@ -14,10 +17,11 @@
         <HabitRow
           :habit="x.h"
           :log="x.log"
-          @update="(e) => onRowUpdate(x.h, e)"
+          :onUpdate="e => onRowUpdate(x.h, e)"
         />
       </div>
     </div>
+
   </section>
 </template>
 
@@ -28,7 +32,7 @@ import HabitRow from '@/components/today/HabitRow.vue'
 const props = defineProps({
   nextSlot: {
     type: Number,
-    default: null,   // v2: slot は「整数」
+    default: null,
   },
   items: {
     type: Array,
@@ -44,10 +48,8 @@ const SLOT_LABEL = {
   1: '朝',
   2: '昼',
   3: '夕',
-  4: '夜'
+  4: '夜',
 }
 
-const nextSlotLabel = computed(() => {
-  return SLOT_LABEL[props.nextSlot] ?? '未定'
-})
+const nextSlotLabel = computed(() => SLOT_LABEL[props.nextSlot] ?? '未定')
 </script>

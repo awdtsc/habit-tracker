@@ -13,12 +13,12 @@ use App\Http\Controllers\StatsController;
 
 /*
 |--------------------------------------------------------------------------
-| API Routes for SPA（Cookie-based Sanctum Auth）
+| API Routes for SPA（Sanctum Cookie認証）
 |--------------------------------------------------------------------------
-| 重要方針
-| - /api/* は web のリダイレクトを絶対に起こさない
-| - auth.api = 未ログインなら常に JSON 401
-| - /api/user のみ auth:sanctum を使う
+| 重要方針:
+| - /api/* は絶対にリダイレクトしない
+| - auth.api: 未ログインなら常に JSON 401
+| - /api/user のみ auth:sanctum
 | - 全 API は JSON を返す
 |--------------------------------------------------------------------------
 */
@@ -32,6 +32,7 @@ Route::get('/health', fn () => ['ok' => true]);
 
 Route::middleware('web')->get('/auth/state', function (Request $req) {
     $u = $req->user();
+
     return [
         'authenticated' => (bool) $u,
         'user' => $u ? [
@@ -44,7 +45,7 @@ Route::middleware('web')->get('/auth/state', function (Request $req) {
 
 
 /*======================================================================
- | 2. /api/user（Sanctum セッション認証）
+ | 2. /api/user（Sanctum）
  *=====================================================================*/
 
 Route::middleware(['web', 'auth:sanctum'])
@@ -52,61 +53,63 @@ Route::middleware(['web', 'auth:sanctum'])
     ->name('api.user');
 
 
+
 /*======================================================================
- | 3. Auth Required API（auth.api：未ログインなら JSON 401）
+ | 3. Auth Required API（auth.api）
  *=====================================================================*/
 
 Route::middleware(['web', 'auth.api'])->group(function () {
 
-    /*-------------------------------
+    /*----------------------------------
      | Today API
-     *------------------------------*/
+     *---------------------------------*/
     Route::get('/today', [TodayController::class, 'show'])
         ->name('api.today');
 
 
-    /*-------------------------------
+    /*----------------------------------
      | Weekly Board API
-     *------------------------------*/
+     *---------------------------------*/
     Route::get('/weekly-board', [StatsController::class, 'weeklyBoard'])
         ->name('api.weekly-board');
 
 
-    /*-------------------------------
-     | ★ Weekly Logs API（フロントが使うのはこれ）
-     | GET /api/habit-logs?start=YYYY-MM-DD&end=YYYY-MM-DD
-     *------------------------------*/
+    /*----------------------------------
+     | Habit Logs（週タブ用）
+     | GET /api/habit-logs?start=&end=
+     *---------------------------------*/
     Route::get('/habit-logs', [HabitLogController::class, 'index'])
         ->name('api.habit-logs.index');
 
 
-    /*-------------------------------
-     | 習慣 CRUD
-     *------------------------------*/
+    /*----------------------------------
+     | Habit CRUD
+     *---------------------------------*/
     Route::apiResource('habits', HabitController::class)
         ->only(['index','store','show','update','destroy'])
         ->names('api.habits');
 
 
-    /*-------------------------------
-     | HabitLog toggle / rate
-     *------------------------------*/
+    /*----------------------------------
+     | ★ HabitLog toggle / rate（Today用）
+     *---------------------------------*/
     Route::post('/habit-logs/toggle', [HabitLogController::class, 'toggle'])
         ->name('api.habit-logs.toggle');
 
-    Route::post('/habit-logs/rate', [HabitLogController::class, 'rate']);
+    Route::post('/habit-logs/rate', [HabitLogController::class, 'rate'])
+        ->name('api.habit-logs.rate');
 
 
-    /*-------------------------------
+    /*----------------------------------
      | Push 購読
-     *------------------------------*/
+     *---------------------------------*/
     Route::post('/push/subscriptions', [PushSubscriptionController::class, 'store']);
     Route::delete('/push/subscriptions', [PushSubscriptionController::class, 'destroy']);
 
 
-    /*-------------------------------
+    /*----------------------------------
      | Remind Task
-     *------------------------------*/
+     *---------------------------------*/
     Route::post('/remind-tasks', [RemindTaskController::class, 'store']);
 
     Route::post('/remind-tasks/{task}/done', [RemindTaskActionController::class, 'done'])

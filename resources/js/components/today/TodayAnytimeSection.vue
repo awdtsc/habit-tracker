@@ -1,8 +1,11 @@
 <!-- resources/js/components/today/TodayAnytimeSection.vue -->
 <template>
   <section v-if="items.length" class="space-y-2">
+
+    <!-- 見出し -->
     <h2 class="text-sm font-semibold text-gray-700">いつでも</h2>
 
+    <!-- カード群 -->
     <div class="rounded-2xl border bg-white divide-y">
       <div
         v-for="x in items"
@@ -10,11 +13,13 @@
         class="px-4 py-3"
       >
         <HabitRow
-          :item="x"
-          @update="e => onRowUpdate(x.h, e)"
+          :habit="x.h"
+          :log="x.log"
+          :onUpdate="onRowUpdate"
         />
       </div>
     </div>
+
   </section>
 </template>
 
@@ -22,7 +27,10 @@
 import HabitRow from '@/components/today/HabitRow.vue'
 
 const props = defineProps({
+  /** items = [{ h, log }] */
   items: { type: Array, default: () => [] },
+
+  /** 完了/未完などの更新時コールバック */
   onRowUpdate: { type: Function, required: true },
 })
 </script>

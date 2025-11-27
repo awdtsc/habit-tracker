@@ -1,13 +1,15 @@
 // resources/js/stores/auth.js
 import { defineStore } from 'pinia'
 import axios from 'axios'
+import { watch } from 'vue'
+import { storeToRefs } from 'pinia'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    user: null,        // ログイン中ユーザー
+    user: null,        // ログインユーザー
     ready: false,      // 認証状態が確定したか
     restoring: false,  // restore() の二重実行防止
-    fetchedOnce: false // ★追加：初回の fetchUser が成功したか
+    fetchedOnce: false // 初回 fetchUser が完了したか
   }),
 
   getters: {
@@ -16,9 +18,9 @@ export const useAuthStore = defineStore('auth', {
 
   actions: {
 
-    /* ============================================================
-     * 1. restore（SPA 起動時）
-     * ============================================================ */
+    /* ============================================
+     * 1. restore（SPA起動時）
+     * ============================================ */
     async restore() {
       if (this.restoring || this.ready) return this.user
 
@@ -31,17 +33,16 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    /* ============================================================
+    /* ============================================
      * 2. fetchUser（/api/user）
-     * ============================================================ */
+     * ============================================ */
     async fetchUser() {
       try {
         const res = await axios.get('/api/user')
         this.user = res.data
         this.ready = true
-        this.fetchedOnce = true   // ★追加：初回認証成功
+        this.fetchedOnce = true
 
-        // イベント発火（WeeklyBoard が反応する）
         window.dispatchEvent(new CustomEvent('auth:ready'))
         window.dispatchEvent(new CustomEvent('auth:logged-in'))
 
@@ -53,11 +54,9 @@ export const useAuthStore = defineStore('auth', {
         if (code === 401 || code === 419) {
           this.user = null
           this.ready = true
-          this.fetchedOnce = true  // ★未ログインだとしても認証確定
+          this.fetchedOnce = true
 
-          // 401 の場合も ready として扱う
           window.dispatchEvent(new CustomEvent('auth:ready'))
-
           return null
         }
 
@@ -67,28 +66,33 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    /* ============================================================
-     * 3. waitUntilReady
-     * ============================================================ */
+    /* ============================================
+     * 3. waitUntilReady（修正版）
+     * ============================================ */
     async waitUntilReady() {
+      // すでに ready ならすぐ resolve
       if (this.ready) return
 
-      await new Promise((resolve) => {
-        const unwatch = this.$watch(
-          () => this.ready,
+      const { ready } = storeToRefs(this)
+
+      // ready が true になるまで watch
+      return await new Promise((resolve) => {
+        const stop = watch(
+          ready,
           (v) => {
             if (v) {
-              unwatch()
+              stop()
               resolve()
             }
-          }
+          },
+          { immediate: true }
         )
       })
     },
 
-    /* ============================================================
-     * 4. login（CSRF → /login → fetchUser）
-     * ============================================================ */
+    /* ============================================
+     * 4. login
+     * ============================================ */
     async login(credentials) {
       await axios.get('/sanctum/csrf-cookie')
 
@@ -99,9 +103,9 @@ export const useAuthStore = defineStore('auth', {
       return await this.fetchUser()
     },
 
-    /* ============================================================
+    /* ============================================
      * 5. logout
-     * ============================================================ */
+     * ============================================ */
     async logout() {
       await axios.post('/logout', {}, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },

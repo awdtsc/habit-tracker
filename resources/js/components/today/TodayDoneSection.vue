@@ -2,19 +2,27 @@
 <template>
   <section v-if="showCompleted" class="space-y-2">
 
+    <!-- Header -->
     <div class="flex items-center justify-between">
       <h2 class="text-sm font-semibold text-gray-700">完了</h2>
 
-      <button class="text-sm underline" @click="$emit('toggle-collapse-done')">
+      <button
+        class="text-sm underline"
+        @click="$emit('toggle-collapse-done')"
+      >
         {{ collapsed ? '完了を表示' : '完了を隠す' }}
       </button>
     </div>
 
+    <!-- List -->
     <div
       v-show="!collapsed"
       class="rounded-2xl border bg-white divide-y"
     >
-      <div v-if="!items.length" class="p-4 text-gray-500">
+      <div
+        v-if="!items.length"
+        class="p-4 text-gray-500"
+      >
         完了した項目はありません。
       </div>
 
@@ -26,7 +34,7 @@
         <HabitRow
           :habit="x.h"
           :log="x.log"
-          @update="e => onRowUpdate(x.h, e)"
+          :onUpdate="e => onRowUpdate(x.h, e)"
         />
       </div>
     </div>
