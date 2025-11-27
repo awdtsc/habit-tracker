@@ -1,8 +1,6 @@
 <!-- resources/js/components/today/TodayNextSlotSection.vue -->
 <template>
   <section v-if="items.length" class="space-y-2">
-
-    <!-- Header -->
     <h2 class="text-sm font-semibold text-gray-700">
       次の時間帯（{{ nextSlotLabel }}）
     </h2>
@@ -28,6 +26,7 @@
 <script setup>
 import { computed } from 'vue'
 import HabitRow from '@/components/today/HabitRow.vue'
+import { slotLabelFor } from '@/domain/timeutil'
 
 const props = defineProps({
   nextSlot: {
@@ -44,12 +43,5 @@ const props = defineProps({
   },
 })
 
-const SLOT_LABEL = {
-  1: '朝',
-  2: '昼',
-  3: '夕',
-  4: '夜',
-}
-
-const nextSlotLabel = computed(() => SLOT_LABEL[props.nextSlot] ?? '未定')
+const nextSlotLabel = computed(() => slotLabelFor(props.nextSlot) ?? '未定')
 </script>

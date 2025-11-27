@@ -1,10 +1,11 @@
 // resources/js/domain/timeutil.js
-
+//------------------------------------------------------------
+// 時間帯スロット Utility（完全統合・安定版）
 //------------------------------------------------------------
 // ⭐ 新ルール：
 //   ・内部処理は 0〜4 の数値だけを使う
 //   ・UI 表示は専用の label 関数に任せる
-//   ・normalizeTimeslot は “文字列 → 文字列 UI 用”
+//   ・normalizeTimeslot は “文字列 → 文字列（UI用）”
 //   ・toSlotNum が “全入力の正規化（最重要）”
 //------------------------------------------------------------
 
@@ -26,8 +27,9 @@ export function toSlotNum(v) {
   // 数値系（"2" など文字列数値も含む）
   const n = Number(v);
   if (!Number.isNaN(n)) {
-    // 0〜4 の範囲に丸める
-    return Math.min(Math.max(n, 0), 4);
+    // 0〜4 の範囲に丸めて整数化
+    const rounded = Math.round(n);
+    return Math.min(Math.max(rounded, 0), 4);
   }
 
   // 文字列系
@@ -46,7 +48,7 @@ export function toSlotNum(v) {
 
 
 /**
- * 🔧 UI 表示用：数値スロット → ラベルへ
+ * 🔧 UI 表示用：数値スロット → ラベル
  *
  * TodayHeader / TodayTab / NextSlotSection の UI は
  * この関数だけを参照すればよい。
@@ -65,9 +67,9 @@ export function slotLabelFor(num) {
 
 /**
  * 🔧 UI 用の “文字列 slottype” が必要な場合だけ使う。
- * （内部では使わない）
+ *   'anytime'|'morning'|'noon'|'evening'|'night'
  *
- * 'anytime'|'morning'|'noon'|'evening'|'night'
+ * （内部では使わない / DBや処理ロジックでは全て toSlotNum で統一）
  */
 export function normalizeTimeslot(v) {
   const n = toSlotNum(v);

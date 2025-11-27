@@ -82,7 +82,7 @@ class TodayController extends Controller
                 ],
 
                 // 今日の HabitLog
-                'log' => $log ? [
+                'today_log' => $log ? [
                     'id'         => $log->id,
                     'status'     => $log->status,
                     'rating'     => $log->rating,

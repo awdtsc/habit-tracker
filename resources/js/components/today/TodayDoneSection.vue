@@ -19,6 +19,7 @@
       v-show="!collapsed"
       class="rounded-2xl border bg-white divide-y"
     >
+      <!-- 0 件 -->
       <div
         v-if="!items.length"
         class="p-4 text-gray-500"
@@ -26,6 +27,7 @@
         完了した項目はありません。
       </div>
 
+      <!-- 1 件以上 -->
       <div
         v-for="x in items"
         :key="'done-' + x.h.id"
@@ -34,7 +36,7 @@
         <HabitRow
           :habit="x.h"
           :log="x.log"
-          :onUpdate="e => onRowUpdate(x.h, e)"
+          :on-row-update="(habit, payload) => onRowUpdate(habit, payload)"
         />
       </div>
     </div>

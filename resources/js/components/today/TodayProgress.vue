@@ -26,7 +26,9 @@ function toNum(v) {
  * Normalized values
  * ----------------------------------------------------- */
 const totalCount = computed(() => toNum(props.progress.total))
-const doneCount  = computed(() => toNum(props.progress.completed))
+const doneCount  = computed(() =>
+  toNum(props.progress.completed ?? props.progress.done)
+)
 
 /* -------------------------------------------------------
  * % calculation
