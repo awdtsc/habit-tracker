@@ -1,6 +1,6 @@
 <!-- resources/js/components/tabs/TodayTab.vue -->
 <script setup>
-import { ref, computed, onMounted, provide } from 'vue'
+import { computed, onMounted, provide } from 'vue'
 
 import TodayHeader from '@/components/today/TodayHeader.vue'
 import TodayProgress from '@/components/today/TodayProgress.vue'
@@ -28,125 +28,93 @@ const weekly = useWeeklyBoard()
 const ui     = useUiState()
 
 /* ----------------------------------------------------------
- * ⚡ ちらつき防止
+ * 恩赦：明示 tab → スロット番号 to tabName
  * -------------------------------------------------------- */
-const ready = ref(false)
-
-/* ----------------------------------------------------------
- * mount 時のタブ復元
- * -------------------------------------------------------- */
-function restoreTab() {
-  const last = sessionStorage.getItem('today:lastTab')
-
-  if (!last || last === 'auto') {
-    core.enableAuto()
-    return
+function slotNumToTabName(num) {
+  const map = {
+    1: 'morning',
+    2: 'noon',
+    3: 'evening',
+    4: 'night',
   }
-
-  core.setTab(last)
+  return map[num] ?? 'all'
 }
 
+/* ----------------------------------------------------------
+ * mount 時のタブ復元（ハイブリッド方式）
+ * -------------------------------------------------------- */
 onMounted(async () => {
   await auth.waitUntilReady()
   if (!auth.isAuthenticated) return
 
   await weekly.fetchWeeklyBoard()
+  if (!core.loaded.value) await core.load()
 
-  if (!core.loaded.value) {
-    await core.load()
+  // Week → Today 遷移時：直前タブの復元
+  const lastTab = sessionStorage.getItem('today:lastTab')
+
+  if (!lastTab) {
+    // 初回アクセス → auto
+    core.enableAuto()
+    return
   }
 
-  restoreTab()
-  ready.value = true
+  // auto は復元しない（危険）
+  if (lastTab === 'auto') {
+    core.enableAuto()
+    return
+  }
+
+  // 明示 tab の復元
+  core.setTab(lastTab)
 })
 
-/* ---------------------------------------------------------- */
+/* ----------------------------------------------------------
+ * タブ名の確定（UI 用）
+ * -------------------------------------------------------- */
 const mode = computed(() => {
   if (core.autoMode.value) return 'auto'
   if (core.selectedSlot.value === null) return 'all'
   return 'slot'
 })
 
-const activeSlot = computed(() => core.activeSlot.value)
-
 /* ----------------------------------------------------------
- * 並び順：priority（高い順）
+ * 状態反映
  * -------------------------------------------------------- */
-const sortByPriority = list =>
-  [...(list ?? [])].sort((a, b) => {
-    const pa = a.h.priority ?? 0
-    const pb = b.h.priority ?? 0
-    return pb - pa
-  })
-
-/* ----------------------------------------------------------
- * 全体リスト
- * -------------------------------------------------------- */
-const allActionable = computed(() =>
-  sortByPriority(core.actionable.value)
+const activeSlot        = computed(() => core.activeSlot.value)
+const topPickSlotLabel  = computed(() =>
+  slotLabelFor(core.topPick.value?.h?.time_slot)
 )
 
-const allDone = computed(() =>
-  sortByPriority(core.done.value)
-)
+const limitOne      = computed(() => ui.state.filter.limit === 1)
+const showCompleted = computed(() => ui.state.filter.showCompleted !== false)
 
 /* ----------------------------------------------------------
- * Slot lists
+ * lists
  * -------------------------------------------------------- */
 const slotLists = computed(() => core.slots.value ?? {})
 
+const applyLimit = (list = []) =>
+  limitOne.value ? list.slice(0, 1) : list
+
 const slotActionable = computed(() =>
-  sortByPriority(slotLists.value?.[activeSlot.value]?.actionable ?? [])
+  applyLimit(slotLists.value?.[activeSlot.value]?.actionable ?? [])
 )
 
 const slotDone = computed(() =>
-  sortByPriority(slotLists.value?.[activeSlot.value]?.done ?? [])
+  slotLists.value?.[activeSlot.value]?.done ?? []
 )
 
-/* ----------------------------------------------------------
- * NextSlot
- * -------------------------------------------------------- */
-const nextSlot = computed(() => core.nextSlot.value)
-const nextSlotItems = computed(() =>
-  sortByPriority(core.nextSlotItems.value ?? [])
+const allActionable = computed(() =>
+  applyLimit(core.actionable.value ?? [])
 )
 
-/* ----------------------------------------------------------
- * topPick: すべてタブの最優先
- * -------------------------------------------------------- */
-const topPick = computed(() => {
-  const arr = allActionable.value
-  return arr.length ? arr[0] : null
-})
-
-const topPickSlotLabel = computed(() =>
-  slotLabelFor(topPick.value?.h?.time_slot)
+const allDone = computed(() =>
+  core.done.value ?? []
 )
 
-/* ----------------------------------------------------------
- * progress（表示中のリストだけで計算）
- * -------------------------------------------------------- */
-const progress = computed(() => {
-  let list = []
-
-  if (mode.value === 'all') {
-    list = [...allActionable.value, ...allDone.value]
-  } else {
-    const rows = slotLists.value?.[activeSlot.value]
-    if (rows) {
-      list = [...slotActionable.value, ...slotDone.value]
-    }
-  }
-
-  const total = list.length
-  const completed = list.filter(i => i.log?.status === 'done').length
-
-  return {
-    total,
-    completed,
-    rate: total === 0 ? 0 : completed / total,
-  }
-})
+const nextSlot      = computed(() => core.nextSlot.value)
+const nextSlotItems = computed(() => core.nextSlotItems.value ?? [])
 
 /* ----------------------------------------------------------
  * Row 操作
@@ -160,11 +128,16 @@ function onRowUpdate(habit, payload = {}) {
   })
 }
 
-/* ---------------------------------------------------------- */
+/* ----------------------------------------------------------
+ * goDetail
+ * -------------------------------------------------------- */
 function goDetail(id) {
   const href = `/habits/${id}`
-  if (window?.$router) window.$router.push(href)
-  else location.assign(href)
+  if (window?.$router) {
+    window.$router.push(href)
+  } else {
+    location.assign(href)
+  }
 }
 
 /* ----------------------------------------------------------
@@ -177,20 +150,20 @@ function changeTab(tabName) {
 </script>
 
 <template>
-  <div v-if="ready" class="p-4 md:p-6 space-y-8">
+  <div class="p-4 md:p-6 space-y-8">
 
     <header>
       <h1 class="text-2xl font-semibold">今日</h1>
       <p class="text-sm text-gray-500">{{ core.todayYmd }}</p>
     </header>
 
-    <TodayProgress :progress="progress" />
+    <TodayProgress :progress="core.progress" />
+
     <TodayHeader :change-tab="changeTab" />
 
-    <!-- ✔ すべてタブのときだけ表示 -->
     <TodayTopPickCard
-      v-if="mode === 'all' && topPick"
-      :top-pick="topPick"
+      v-if="core.topPick"
+      :top-pick="core.topPick"
       :timeslot-label="topPickSlotLabel"
       :onRowUpdate="onRowUpdate"
     />
@@ -208,7 +181,7 @@ function changeTab(tabName) {
         </div>
       </div>
 
-      <div v-if="ui.state.filter.showCompleted">
+      <div v-if="showCompleted">
         <TodayDoneSection
           :items="allDone"
           :showCompleted="true"
@@ -231,7 +204,7 @@ function changeTab(tabName) {
         </div>
       </div>
 
-      <div v-if="ui.state.filter.showCompleted">
+      <div v-if="showCompleted">
         <TodayDoneSection
           :items="slotDone"
           :showCompleted="true"
@@ -261,7 +234,7 @@ function changeTab(tabName) {
         </div>
       </div>
 
-      <div v-if="ui.state.filter.showCompleted">
+      <div v-if="showCompleted">
         <TodayDoneSection
           :items="slotDone"
           :showCompleted="true"
