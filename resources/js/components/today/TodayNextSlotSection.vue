@@ -15,7 +15,7 @@
         <HabitRow
           :habit="x.h"
           :log="x.log"
-          :onUpdate="e => onRowUpdate(x.h, e)"
+          :onRowUpdate="e => onRowUpdate(x.h, e)"
         />
       </div>
     </div>

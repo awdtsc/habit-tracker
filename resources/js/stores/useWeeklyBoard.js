@@ -1,6 +1,7 @@
 // resources/js/stores/useWeeklyBoard.js
 import { reactive } from 'vue'
 import axios from '@/bootstrap'
+import { useHabitBoardStore } from '@/stores/habitBoard/store'   // ← ★ 追加
 
 /* ========================================
  * Utility
@@ -36,7 +37,6 @@ const state = reactive({
  * Weekly Board Fetch
  * =======================================*/
 async function fetchWeeklyBoard(startISO = null) {
-  // null → 今日に補完
   const target = startISO ?? todayISO()
 
   console.log('[WeeklyBoard] fetchWeeklyBoard →', target)
@@ -111,7 +111,7 @@ function getStatus(habitId, dateISO) {
 }
 
 /* ========================================
- * toggle
+ * toggle（★今日はここが核心改修ポイント）
  * =======================================*/
 async function toggle(habitId, dateISO, slot = 0) {
   console.log('[WeeklyBoard] toggle:', habitId, dateISO, slot)
@@ -153,6 +153,13 @@ async function toggle(habitId, dateISO, slot = 0) {
     if (Array.isArray(raw.rates)) {
       state.rates = raw.rates
     }
+
+    /* ----------------------------------------------------
+     * ★ ここが本日の修正の本丸（TodayStoreへ反映）
+     * ---------------------------------------------------- */
+    const board = useHabitBoardStore()
+    board.applyExternalLogUpdate(normalized)
+
   } catch (err) {
     console.error('[WeeklyBoard] ERROR toggle:', err)
   }

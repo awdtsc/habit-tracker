@@ -1,6 +1,6 @@
 // resources/js/composables/useTodayState.js
 //------------------------------------------------------------
-// Today State v3 — HabitBoardStore 直結・完全安定版
+// Today State v4 — VM一本化 + priority 統一 + TopPick=ALL 最優先
 //------------------------------------------------------------
 import { ref, computed } from 'vue'
 import { useHabitBoardStore } from '@/stores/habitBoard/store'
@@ -9,7 +9,7 @@ import { toSlotNum } from '@/domain/timeutil'
 export function useTodayState() {
 
   //------------------------------------------------------------
-  // Store（遅延初期化・単一インスタンス保証）
+  // Store（遅延初期化）
   //------------------------------------------------------------
   let board = null
   const getBoard = () => (board ??= useHabitBoardStore())
@@ -40,29 +40,60 @@ export function useTodayState() {
   }
 
   //------------------------------------------------------------
-  // Store → VM（唯一のソース）
+  // Raw VM（Store → 見える値の唯一ソース）
   //------------------------------------------------------------
   const vm       = computed(() => getBoard().todayVM       ?? {})
   const planned  = computed(() => getBoard().todayPlanned ?? [])
   const todayYmd = computed(() => getBoard().todayDate    ?? null)
   const nowSlot  = computed(() => getBoard().nowSlot      ?? null)
 
-  const actionable = computed(() => vm.value.actionable ?? [])
-  const done       = computed(() => vm.value.done       ?? [])
+  //------------------------------------------------------------
+  // Priority ソート
+  //------------------------------------------------------------
+  const sortByPriority = (list = []) =>
+    [...list].sort((a, b) => {
+      const pa = Number(a?.h?.priority ?? 0)
+      const pb = Number(b?.h?.priority ?? 0)
+      return pb - pa   // 高い順
+    })
 
+  //------------------------------------------------------------
+  // ALL（未完了 / 完了）
+  //------------------------------------------------------------
+  const actionable = computed(() =>
+    sortByPriority(vm.value.actionable ?? [])
+  )
+
+  const done = computed(() =>
+    sortByPriority(vm.value.done ?? [])
+  )
+
+  //------------------------------------------------------------
   // bySlot = {0:{actionable[],done[]},1:{…}}
-  const slots = computed(() =>
-    vm.value.bySlot ?? {
+  //------------------------------------------------------------
+  const slots = computed(() => {
+    const raw = vm.value.bySlot ?? {
       0:{ actionable:[], done:[] },
       1:{ actionable:[], done:[] },
       2:{ actionable:[], done:[] },
       3:{ actionable:[], done:[] },
       4:{ actionable:[], done:[] },
     }
-  )
+
+    const dst = {}
+
+    for (let s = 0; s <= 4; s++) {
+      const grp = raw[s] ?? { actionable:[], done:[] }
+      dst[s] = {
+        actionable: sortByPriority(grp.actionable ?? []),
+        done      : sortByPriority(grp.done ?? []),
+      }
+    }
+    return dst
+  })
 
   //------------------------------------------------------------
-  // progress / topPick
+  // progress
   //------------------------------------------------------------
   const progress = computed(() => {
     const p = vm.value.progress
@@ -70,7 +101,13 @@ export function useTodayState() {
     return p
   })
 
-  const topPick = computed(() => vm.value.topPick ?? null)
+  //------------------------------------------------------------
+  // ★ topPick = ALL の "未完了の最優先" に一本化
+  //------------------------------------------------------------
+  const topPick = computed(() => {
+    const arr = actionable.value
+    return arr.length ? arr[0] : null
+  })
 
   //------------------------------------------------------------
   // Slot mode（Auto / Manual 切替）
@@ -90,31 +127,24 @@ export function useTodayState() {
     autoMode.value = false
   }
 
-  // 数値化スロット（1〜4）以外は null
-  const activeSlotNum = computed(() => {
-    const raw = autoMode.value ? nowSlot.value : selectedSlot.value
-    const num = toSlotNum(raw)
-    return (num >= 1 && num <= 4) ? num : null
-  })
+  const activeSlotNum = computed(() =>
+    toSlotNum(autoMode.value ? nowSlot.value : selectedSlot.value)
+  )
 
   //------------------------------------------------------------
   // nextSlot（「今の時間帯」基準での次スロット）
   //------------------------------------------------------------
   const nextSlot = computed(() => {
-    // ① 常に「今の時間帯」から見た slot を使う
     const base = toSlotNum(nowSlot.value)
     if (!base || base >= 4) return null
 
-    // ② 直後の 1 スロットだけを見る
     const next = base + 1
     const group = slots.value?.[next]
 
-    // ③ 次スロットに actionable が 1件以上ある場合のみ有効
-    if (group && Array.isArray(group.actionable) && group.actionable.length > 0) {
+    if (group && group.actionable?.length > 0) {
       return next
     }
 
-    // ④ それ以外は「次にやる習慣なし」
     return null
   })
 
@@ -122,8 +152,9 @@ export function useTodayState() {
     const ns = nextSlot.value
     if (!ns) return []
     const group = slots.value?.[ns]
-    return group?.actionable ?? []
+    return sortByPriority(group?.actionable ?? [])
   })
+
   //------------------------------------------------------------
   // toggle（完了/未完）
   //------------------------------------------------------------
@@ -136,27 +167,47 @@ export function useTodayState() {
       return
     }
 
-    // planned から対象 row 取得
     const row = planned.value.find(x => Number(x?.h?.id) === Number(id))
     if (!row) {
       console.warn('[toggle] habit not found id=', id)
       return
     }
 
-    // 本日の slot を決定（h.time_slot → today_log.time_slot）
     const slot = toSlotNum(row?.h?.time_slot ?? row?.today_log?.time_slot ?? 0)
 
     const payload = {
       habit_id: id,
       date,
       time_slot: slot,
-      value    : value  ?? null,
-      rating   : rating ?? null,
-      status   : status ?? null,
+      value  : value  ?? null,
+      rating : rating ?? null,
+      status : status ?? null,
     }
 
-    // Store（optimistic → confirmed → VM 再構築）
+    // optimistic + confirmed + VM再生成
     await b.toggleLog(payload)
+  }
+
+  //------------------------------------------------------------
+  // Tab Setter
+  //------------------------------------------------------------
+  function setTab(tabName) {
+    if (tabName === 'auto') {
+      enableAuto()
+      return
+    }
+
+    disableAuto()
+
+    const map = {
+      all     : null,
+      morning : 1,
+      noon    : 2,
+      evening : 3,
+      night   : 4,
+    }
+
+    selectedSlot.value = map[tabName] ?? null
   }
 
   //------------------------------------------------------------
@@ -171,12 +222,12 @@ export function useTodayState() {
     todayYmd,
     nowSlot,
 
-    actionable,
-    done,
-    slots,
+    actionable,   // ★ ALL（未完了） priority ソート済
+    done,         // ★ ALL（完了） priority ソート済
+    slots,        // ★ slotごとに priority ソート済
 
     progress,
-    topPick,
+    topPick,      // ★ ALL の最優先
 
     nextSlot,
     nextSlotItems,
@@ -189,6 +240,7 @@ export function useTodayState() {
     disableAuto,
 
     toggle,
+    setTab,
   }
 
   if (typeof window !== 'undefined') window.__today = core

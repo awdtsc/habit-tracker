@@ -2,8 +2,7 @@
 import { toSlotNum } from '@/domain/timeutil'
 
 /* ============================================================
- * items / actionable / done / bySlot / progress / nextSlot / topPick
- * を１回のループで全部まとめて作る最適化版
+ * Today ViewModel（progress は作らない）
  * ============================================================ */
 
 export function buildTodayViewModel({
@@ -18,7 +17,6 @@ export function buildTodayViewModel({
   const actionable = []
   const done = []
 
-  // slot ごとに actionable / done を個別に保持
   const bySlot = {
     0: { actionable: [], done: [] },
     1: { actionable: [], done: [] },
@@ -26,9 +24,6 @@ export function buildTodayViewModel({
     3: { actionable: [], done: [] },
     4: { actionable: [], done: [] },
   }
-
-  let completed = 0
-  let total = 0
 
   let topPick = null
   let topPickSlot = Infinity
@@ -38,11 +33,9 @@ export function buildTodayViewModel({
     const h = row.h || {}
     const id = Number(h.id)
 
-    // slot 正規化（log の fallback も含む）
     const rawSlot = h.time_slot ?? row.today_log?.time_slot ?? 0
     const slotNum = toSlotNum(rawSlot)
 
-    // log 取得
     const fromStore = typeof getLog === 'function'
       ? getLog(id, date, slotNum)
       : null
@@ -52,19 +45,16 @@ export function buildTodayViewModel({
     const item = { h: { ...h, id, time_slot: slotNum }, log }
 
     items.push(item)
-    total++
 
     const isDone = log?.status === 'done'
 
     if (isDone) {
       done.push(item)
-      completed++
       bySlot[slotNum]?.done.push(item)
     } else {
       actionable.push(item)
       bySlot[slotNum]?.actionable.push(item)
 
-      // topPick: slot → id の順で最小を取る
       if (slotNum < topPickSlot || (slotNum === topPickSlot && id < topPickId)) {
         topPick = item
         topPickSlot = slotNum
@@ -73,31 +63,18 @@ export function buildTodayViewModel({
     }
   }
 
-  const progress = {
-    total,
-    completed,
-    done: completed,
-    rate: total === 0 ? 0 : completed / total,
-  }
-
-  // nextSlot:
-  // 現状では nowSlot を “AUTO モードの初期値” として保持。
-  // 実際の next-slot 推移は TodayTab / TodayHeader 側で制御する。
-  const normalizedNowSlot = Number(nowSlot ?? 0) || null
-
   return {
     items,
     actionable,
     done,
     bySlot,
-    progress,
-    nextSlot: normalizedNowSlot,
+    nextSlot: Number(nowSlot ?? 0) || null,
     topPick,
   }
 }
 
 /* ============================================================
- * 旧 selectTodayViewModel 互換関数
+ * Legacy wrapper
  * ============================================================ */
 export function selectTodayViewModel(args) {
   return buildTodayViewModel(args)

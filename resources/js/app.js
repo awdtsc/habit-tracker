@@ -58,8 +58,36 @@ axios.defaults.withCredentials = true
   app.use(pinia)
   app.use(router)
   await router.isReady()
+
+  /* -------------------------------------------------------
+   * ★★ 今日タブのハイブリッド復元ガード ★★
+   *   - Week → Today のときだけ last_tab を適用
+   *   - auto は復元しない（毎回再判定）
+   * ----------------------------------------------------- */
+  router.beforeEach((to, from, next) => {
+    // Week → Today の場合のみ対象
+    if (from.name === 'week' && to.name === 'today') {
+
+      const last = localStorage.getItem('today_last_tab')
+
+      if (last && last !== 'auto') {
+        // 明示タブなら復元
+        to.meta.restoreTodayTab = last
+      } else {
+        // auto は復元しない（＝今回の auto 判定を適用）
+        to.meta.restoreTodayTab = null
+      }
+    }
+
+    next()
+  })
+
+  /* -------------------------------------------------------
+   * mount
+   * ----------------------------------------------------- */
   app.mount(el)
   console.log('[APP] mounted')
+
 
   /* -------------------------------------------------------
    * 5. mount 後に store をロード（ここが最重要）

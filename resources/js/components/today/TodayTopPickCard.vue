@@ -1,33 +1,31 @@
 <!-- resources/js/components/today/TodayTopPickCard.vue -->
 <template>
-  <section v-if="topPick && topPick.h" class="rounded-2xl border p-4 bg-amber-50">
-    <div class="flex items-start justify-between gap-3">
+  <section
+    v-if="topPick && topPick.h"
+    class="rounded-2xl border p-4 bg-amber-50"
+  >
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <div class="text-xs font-semibold text-amber-700">いまのおすすめ</div>
+        <div class="text-xs font-semibold text-amber-700">
+          いまのおすすめ
+        </div>
 
         <!-- 安全ガード付き -->
-        <div class="text-lg font-semibold">
+        <div class="text-lg font-semibold mt-1">
           {{ topPick.h?.title || topPick.h?.name || '' }}
         </div>
 
-        <div class="text-xs text-gray-500">
+        <div class="text-xs text-gray-500 mt-1">
           スロット: {{ slotLabel }}
         </div>
       </div>
 
-      <div class="flex gap-2">
+      <div class="flex gap-2 self-end sm:self-auto">
         <button
-          class="px-3 py-1.5 text-sm rounded-md bg-blue-600 text-white"
+          class="px-4 py-1.5 text-sm rounded-md bg-blue-600 text-white"
           @click="onRowUpdate(topPick.h, { status: 'done', value: true })"
         >
           完了にする
-        </button>
-
-        <button
-          class="px-3 py-1.5 text-sm rounded-md border"
-          @click="openRemindModal(topPick.h.id)"
-        >
-          後で（通知）
         </button>
       </div>
     </div>
@@ -35,8 +33,6 @@
 </template>
 
 <script setup>
-import axios from '@/axios'
-
 const props = defineProps({
   topPick: { type: Object, required: true },
   timeslotLabel: { type: String, required: true },
@@ -44,31 +40,4 @@ const props = defineProps({
 })
 
 const slotLabel = props.timeslotLabel
-
-// 時間帯を表示用文字列に変換
-const slotStr = (v) => {
-  const n = Number(v || 0)
-  if (n === 1) return 'morning'
-  if (n === 2) return 'noon'
-  if (n === 3) return 'evening'
-  if (n === 4) return 'night'
-  return 'flex'
-}
-
-async function openRemindModal(habitId) {
-  try {
-    const { data } = await axios.get('/api/remind-tasks/latest-by-habit', {
-      params: { habit_id: habitId },
-      withCredentials: true,
-    })
-    const taskId = data?.task?.id
-    if (taskId) {
-      const ev = new CustomEvent('open-remind-modal', { detail: { taskId } })
-      window.__remindBus?.dispatchEvent(ev)
-      window.dispatchEvent(ev)
-    }
-  } catch (e) {
-    console.error('[TodayTopPickCard] openRemindModal failed', e?.response?.data || e)
-  }
-}
 </script>

@@ -87,10 +87,9 @@ export const useHabitBoardStore = defineStore('habitBoard', {
   actions: {
 
     //--------------------------------------------------------
-    // applyLogUpdate（ログ1件反映）
+    // applyLogUpdate（Today 用：1件更新）
     //--------------------------------------------------------
     applyLogUpdate(log) {
-      console.log('[STORE] applyLogUpdate', log)
       if (!log) return
 
       this.todayLogs[keyFor(log.habit_id, log.date, log.time_slot)] = log
@@ -115,14 +114,26 @@ export const useHabitBoardStore = defineStore('habitBoard', {
     },
 
     //--------------------------------------------------------
+    // applyExternalLogUpdate（★追加：外部ストアからの反映）
+    //--------------------------------------------------------
+    applyExternalLogUpdate(raw) {
+      const log = normalizeLog(raw)
+      if (!log) return
+
+      // Today 本体に書き込む
+      this.applyLogUpdate(log)
+
+      // VM 再構築（今日タブ表示を即更新）
+      this.rebuildTodayView()
+    },
+
+    //--------------------------------------------------------
     // fetchToday
     //--------------------------------------------------------
     async fetchToday() {
-      console.log('[STORE] fetchToday start')
       this.loading = true
       try {
         const data = await api.apiFetchToday()
-        console.log('[STORE] fetchToday API result', data)
 
         this.todayDate = data.date
         this.nowSlot = toSlotNum(data.now_slot ?? data.current_slot ?? null) || null
@@ -162,8 +173,6 @@ export const useHabitBoardStore = defineStore('habitBoard', {
     // rebuildTodayView
     //--------------------------------------------------------
     rebuildTodayView() {
-      console.log('[STORE] rebuildTodayView')
-
       const vm = buildTodayViewModel({
         planned: this.todayPlanned,
         getLog: this.getLog,
@@ -171,24 +180,13 @@ export const useHabitBoardStore = defineStore('habitBoard', {
         nowSlot: this.nowSlot,
       })
 
-      // ❗ オブジェクトごと置き換えない（重い）
-      // this.todayView = vm
-
-      // ✔ 部分更新のみ（高速）
       Object.assign(this.todayView, vm)
-
-      console.log('[STORE] todayView = ', this.todayView)
     },
 
-
     //--------------------------------------------------------
-    // toggleLog（完了/未完）
+    // toggleLog（Today 用：完了/未完）
     //--------------------------------------------------------
     async toggleLog(raw) {
-      console.log('[STORE] toggleLog called, raw =', raw)
-
-      // ⚠ simple の場合は value を送らない
-      // self の場合（rating > 0 のときだけ送る）
       let payload = {
         habit_id : raw.habit_id ?? raw.id,
         date     : raw.date ?? this.todayDate,
@@ -200,48 +198,33 @@ export const useHabitBoardStore = defineStore('habitBoard', {
         if (raw.value != null)  payload.value  = raw.value
       }
 
-      console.log('[STORE] toggle payload', payload)
-
-      //----------------------------------------------------
-      // Optimistic Update
-      //----------------------------------------------------
+      // Optimistic
       const optimistic = normalizeLog(
         { ...payload, updated_at: new Date().toISOString() },
         payload
       )
-
       if (optimistic) {
-        console.log('[STORE] optimistic applied')
         this.applyLogUpdate(optimistic)
       }
 
-      //----------------------------------------------------
-      // API request
-      //----------------------------------------------------
+      // API
       let res
       try {
         res = await api.apiToggleHabitLog(payload)
-        console.log('[STORE] API response', res)
       } catch (e) {
         console.error('[STORE] API ERROR', e)
         return
       }
 
-      //----------------------------------------------------
-      // Confirmed update
-      //----------------------------------------------------
+      // confirmed
       const log = normalizeLog(res, payload)
       if (log) {
-        console.log('[STORE] confirmed log applied', log)
         this.applyLogUpdate(log)
       }
 
-      //----------------------------------------------------
-      // ViewModel 再構築
-      //----------------------------------------------------
       this.rebuildTodayView()
-
       return res
     },
+
   },
 })

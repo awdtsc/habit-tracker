@@ -16,7 +16,7 @@
         <textarea v-model.trim="form.description" rows="3" class="w-full border rounded p-2"></textarea>
       </div>
 
-      <!-- （保留）通知時間：サーバ側では habit_times に寄せる想定。値は受けても無視してOK -->
+      <!-- 通知（将来対応） -->
       <div class="mb-4">
         <label class="block font-bold mb-1">通知時間（任意・将来対応）</label>
         <input v-model="form.notify_time" type="time" class="w-40 border rounded p-2" />
@@ -28,6 +28,7 @@
       <!-- 頻度 -->
       <div class="mb-4">
         <label class="block font-bold mb-2">頻度</label>
+
         <div class="grid grid-cols-2 gap-3">
           <label class="inline-flex items-center gap-2">
             <input type="radio" value="daily" v-model="form.frequency_type" />毎日
@@ -111,7 +112,6 @@
             <option value="simple">単純評価（達成/未達成）</option>
             <option value="self">自己評価（点数やコメント付き）</option>
           </select>
-          <p class="mt-1 text-xs text-gray-500">※ 自己評価は habit_logs.rating を使用</p>
         </div>
         <div>
           <label class="block font-bold mb-1">カテゴリ（任意）</label>
@@ -137,7 +137,7 @@
 <script setup>
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
+import axios from '@/axios'
 
 const router = useRouter()
 const submitting = ref(false)
@@ -146,58 +146,72 @@ const DOW_JP = {1:'月',2:'火',3:'水',4:'木',5:'金',6:'土',7:'日'}
 
 const form = reactive({
   title: '', description: '',
-  notify_time: '',              // 将来対応用
+  notify_time: '',
   frequency_type: 'daily',
-  days_of_week: [],             // custom のときのみ使用（数値配列）
-  weekly_quota: 3,              // quota のときのみ使用
+  days_of_week: [],
+  weekly_quota: 3,
   start_date: '', end_date: '', no_end: true,
   time_slot: 'anytime',
   evaluation_type: 'simple',
   category: '', color_tag: '',
 })
 
+/* ------------------------------
+ * 正規化：APIと一致させる
+ * ---------------------------- */
 function normalizePayload() {
-  // v-model は文字列で入る可能性があるので数値化
-  const days = Array.isArray(form.days_of_week)
-    ? form.days_of_week.map(n => Number(n)).filter(n => n >= 1 && n <= 7)
-    : []
+  // time_slot → 数値化
+  const slotMap = {
+    anytime: 0,
+    morning: 1,
+    noon: 2,
+    evening: 3,
+    night: 4,
+  }
+
+  const days =
+    form.frequency_type === 'custom'
+      ? form.days_of_week.map(n => Number(n))
+      : form.frequency_type === 'daily'
+      ? [1,2,3,4,5,6,7]
+      : form.frequency_type === 'weekdays'
+      ? [1,2,3,4,5]
+      : form.frequency_type === 'weekends'
+      ? [6,7]
+      : null  // quota のとき
 
   const payload = {
     title: form.title?.trim(),
     description: form.description?.trim() || null,
     frequency_type: form.frequency_type,
-    days_of_week: form.frequency_type === 'custom' ? days : null,
+    days_of_week: days,
     weekly_quota: form.frequency_type === 'quota' ? Number(form.weekly_quota || 0) : null,
     start_date: form.start_date || null,
     end_date: form.no_end ? null : (form.end_date || null),
-    time_slot: form.time_slot,                 // API側で 0..4 に変換
+    time_slot: slotMap[form.time_slot] ?? 0,
     evaluation_type: form.evaluation_type,
     category: form.category?.trim() || null,
     color_tag: form.color_tag?.trim() || null,
     notify_time: form.notify_time || null,
   }
 
-  // quota の weekly_quota が不正なら null
-  if (payload.frequency_type !== 'quota') payload.weekly_quota = null
-
   return payload
 }
 
 function goIndex() {
-  // 現在のルート名に合わせる
   router.push({ name: 'habits.index' })
 }
 
 async function submit() {
   const payload = normalizePayload()
   submitting.value = true
+
   try {
     await axios.post('/api/habits', payload)
-    // 成功したら一覧へ
     goIndex()
   } catch (e) {
-    console.error('[HabitCreate] create failed', e?.response?.data || e)
-    alert('登録に失敗しました。入力内容とサーバのエラーログを確認してください。')
+    console.error('[HabitsCreate] failed', e?.response?.data || e)
+    alert('登録に失敗しました。内容を確認してください。')
   } finally {
     submitting.value = false
   }
