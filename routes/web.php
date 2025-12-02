@@ -1,30 +1,52 @@
 <?php
 
-use App\Http\Controllers\{ProfileController, HabitController, HabitLogController, StatsController};
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Http\Request;
 
-Route::get('/', fn () => view('welcome'));
+/*
+|--------------------------------------------------------------------------
+| Web Routes (SPA)
+|--------------------------------------------------------------------------
+| - login/logout は JSON API として動かす
+| - GET /login およびすべての画面遷移は SPA Shell を返す
+|--------------------------------------------------------------------------
+*/
 
-// ✅ SPA 用キャッチオール（/dashboard 配下は全部これで返す）
-Route::middleware(['auth','verified'])->group(function () {
-    Route::view('/dashboard/{any?}', 'spa')->where('any', '.*')->name('dashboard');
-});
+Route::middleware('web')->group(function () {
 
-Route::middleware('auth')->group(function () {
-    // プロフィール
-    Route::get('/profile', [ProfileController::class,'edit'])->name('profile.edit');
-    Route::patch('/profile', [ProfileController::class,'update'])->name('profile.update');
-    Route::delete('/profile', [ProfileController::class,'destroy'])->name('profile.destroy');
+    // ---- JSON Login (POST) ----
+    Route::post('/login', function (Request $request) {
 
-    // 習慣 CRUD（従来のweb）
-    Route::resource('habits', HabitController::class)->except(['show']);
+        $credentials = $request->validate([
+            'email'    => ['required', 'email'],
+            'password' => ['required', 'string'],
+        ]);
 
-    // === Vue が叩く API は /api/* に統一 ===
-    Route::prefix('api')->as('api.')->group(function () {
-        Route::get('/weekly-board', [StatsController::class, 'weeklyBoard'])->name('weekly-board');
-        Route::post('/habit-logs/toggle', [HabitLogController::class, 'toggle'])->name('habit-logs.toggle');
-        Route::get('/achievement/weekly', [StatsController::class, 'weeklyByDay'])->name('achievement.weekly');
+        if (Auth::attempt($credentials)) {
+            $request->session()->regenerate();
+            return response()->json([
+                'ok'   => true,
+                'user' => Auth::user(),
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Invalid credentials',
+        ], 422);
     });
-});
 
-require __DIR__.'/auth.php';
+    // ---- JSON Logout (POST) ----
+    Route::post('/logout', function (Request $request) {
+        Auth::guard('web')->logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+        return response()->noContent();
+    });
+
+    // ---- SPA Shell for ALL GET routes except /api ----
+    Route::get('/{any}', function () {
+        return view('app');     // Vue SPA
+    })->where('any', '^(?!api|sanctum).*$');
+
+});

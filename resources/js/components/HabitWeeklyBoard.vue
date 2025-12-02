@@ -1,122 +1,225 @@
 <!-- resources/js/components/HabitWeeklyBoard.vue -->
 <script setup>
-import { computed, onMounted } from 'vue'
-import { useHabitBoard } from '@/stores/useHabitBoard'
+import { onMounted, computed } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+import { useWeeklyBoard } from '@/stores/useWeeklyBoard'
 import ChartWeekly from '@/components/ChartWeekly.vue'
 
-const { state, fetchBoard, toggle, isFresh } = useHabitBoard()
+/* ---------------------------------------
+ * Store
+ * ------------------------------------- */
+const auth = useAuthStore()
+const weekly = useWeeklyBoard()
 
-// 週の開始日は store(state.start) を使用
-onMounted(() => {
-  if (!isFresh(60_000) || !state.habits.length) fetchBoard({ silent: !!state.habits.length })
+if (typeof window !== 'undefined') window.__weekly = weekly
+
+/* ---------------------------------------
+ * 曜日ラベル
+ * ------------------------------------- */
+const DOW_JP = ['月', '火', '水', '木', '金', '土', '日']
+
+/* ---------------------------------------
+ * 週の7日
+ * ------------------------------------- */
+const days = computed(() => weekly.state.days ?? [])
+
+/* ---------------------------------------
+ * 日付ごとの「その日に予定がある習慣」リスト
+ * ------------------------------------- */
+const habitsByDate = computed(() => {
+  const map = {}
+
+  for (const d of days.value) {
+    const iso = d.iso
+    map[iso] = (weekly.state.habits ?? []).filter(h =>
+      weekly.isPlanned(h.id, iso)
+    )
+  }
+
+  return map
 })
 
-/* 日付ユーティリティ（表示用） */
-function addDays(date, n){ const d = new Date(date); d.setDate(d.getDate()+n); return d }
-function iso(d){ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}` }
-function mmdd(d){ return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}` }
+/* ---------------------------------------
+ * 週移動
+ * ------------------------------------- */
+function shiftWeek(n) {
+  const base = weekly.state.week_start
+  if (!base) return
 
-const DOW_EN = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
-const days = computed(() =>
-  Array.from({length:7},(_,i)=> {
-    const dt = addDays(state.start, i)
-    return { iso: iso(dt), mmdd: mmdd(dt), dowEn: DOW_EN[i] }
-  })
-)
+  const date = new Date(base)
+  date.setDate(date.getDate() + n * 7)
 
-const key = (hid, dateISO) => `${hid}|${dateISO}`
-const isChecked = (hid, dateISO) => !!state.checks[key(hid, dateISO)]
-const todayISO = iso(new Date())
-
-/* その日が対象か（storeのロジックと整合させる） */
-function isScheduledFor(h, dateISO){
-  if (h?.start_date && dateISO < h.start_date) return false
-  if (h?.end_date   && dateISO > h.end_date)   return false
-  const dt = new Date(dateISO)
-  const dow = ((dt.getDay()+6)%7)+1
-  switch (h?.frequency_type){
-    case 'daily': return true
-    case 'weekdays': return dow>=1 && dow<=5
-    case 'weekends': return dow===6 || dow===7
-    case 'custom': return Array.isArray(h?.days_of_week) && h.days_of_week.map(Number).includes(dow)
-    case 'quota': return true
-    default: return true
-  }
+  const iso = date.toISOString().slice(0, 10)
+  weekly.fetchWeeklyBoard(iso)
 }
-const isDisabled = (h, dateISO) => {
-  if (dateISO > todayISO) return true
-  if (!isScheduledFor(h, dateISO)) return true
+
+/* ---------------------------------------
+ * カード色
+ * ------------------------------------- */
+function cardClass(hid, dateISO) {
+  const st = weekly.getStatus(hid, dateISO)
+  if (st === 'done') return 'bg-green-500 text-white'
+  if (st === 'pending') return 'bg-orange-400 text-white'
+  return 'bg-gray-200 text-gray-500'
+}
+
+/* ---------------------------------------
+ * 押せるかどうか
+ * ------------------------------------- */
+function isDisabled(h, dateISO) {
+  const today = new Date().toISOString().slice(0, 10)
+
+  if (dateISO > today) return true
+  if (h.start_date && dateISO < h.start_date) return true
+  if (h.end_date && dateISO > h.end_date) return true
+  if (!weekly.isPlanned(h.id, dateISO)) return true
+
   return false
 }
 
-/* 週移動：state.start を動かしてから再取得 */
-function shiftWeek(n){
-  const d = new Date(state.start); d.setDate(d.getDate() + n*7)
-  state.start = d
-  fetchBoard({ silent: true })
+/* ---------------------------------------
+ * トグル（習慣 + 日付）
+ * ------------------------------------- */
+async function onToggle(habit, dateISO) {
+  const slot = Number(habit.time_slot ?? 0)
+
+  try {
+    // 1) トグル
+    await weekly.toggle(habit.id, dateISO, slot)
+
+    // 2) 最新週データを再取得（rates / logs / days すべて更新）
+    await weekly.fetchWeeklyBoard(weekly.state.week_start)
+
+  } catch (e) {
+    console.error('[WeeklyBoard] toggle failed', e)
+  }
 }
 
-/* 週表からのトグルも store 経由でOK（楽観更新→ratesも即反映） */
-const onToggle = (hid, dateISO, val) => toggle(hid, dateISO, val)
+/* ---------------------------------------
+ * 初回ロード
+ * ------------------------------------- */
+onMounted(async () => {
+  await auth.waitUntilReady()
+  if (!auth.isAuthenticated) return
+
+  await weekly.fetchWeeklyBoard()
+})
 </script>
 
 <template>
   <section class="mx-auto max-w-6xl p-6 space-y-6">
+
+    <!-- Header -->
     <div class="flex items-center justify-between">
-      <button class="text-blue-600 hover:underline" @click="shiftWeek(-1)">← 前の週</button>
+      <button class="text-blue-600 hover:underline" @click="shiftWeek(-1)">
+        ← 前の週
+      </button>
+
       <div class="text-2xl font-semibold select-none tracking-wide">
-        {{ mmdd(state.start) }} 〜 {{ mmdd(new Date(state.start.getFullYear(), state.start.getMonth(), state.start.getDate()+6)) }}
+        {{ weekly.state.range_label }}
       </div>
-      <button class="text-blue-600 hover:underline" @click="shiftWeek(1)">次の週 →</button>
+
+      <button class="text-blue-600 hover:underline" @click="shiftWeek(1)">
+        次の週 →
+      </button>
     </div>
 
-    <div class="rounded-2xl bg-white shadow ring-1 ring-gray-200 overflow-x-auto">
-      <table class="table-fixed w-full" style="--habit-col: 8.5rem;">
-        <colgroup>
-          <col style="width: var(--habit-col)" />
-          <col v-for="i in 7" :key="i" :style="{ width: 'calc((100% - var(--habit-col)) / 7)'}" />
-        </colgroup>
+    <!-- PC: 7列が 100% に収まるグリッド -->
+    <div class="hidden md:grid grid-cols-7 gap-0 rounded-2xl bg-white shadow ring-1 ring-gray-200">
+      <div
+        v-for="(d, idx) in days"
+        :key="d.iso"
+        class="p-4 border-r last:border-r-0 border-gray-200"
+      >
+        <!-- 日付 -->
+        <div class="mb-4 text-center">
+          <div class="text-sm text-gray-500">{{ d.label }}</div>
+          <div class="text-xs text-gray-400">{{ DOW_JP[idx] }}</div>
+        </div>
 
-        <thead class="bg-gray-50 border-b">
-          <tr class="align-middle">
-            <th class="p-0 text-left"><div class="px-4 py-4 text-sm font-semibold text-gray-700">習慣</div></th>
-            <th v-for="d in days" :key="d.iso" class="p-0">
-              <div class="h-12 w-full pl-4 pr-[14px] flex flex-col items-end justify-center">
-                <div class="text-[15px] leading-tight tabular-nums">{{ d.mmdd }}</div>
-                <div class="text-xs text-gray-500 leading-tight">{{ d.dowEn }}</div>
-              </div>
-            </th>
-          </tr>
-        </thead>
+        <!-- 習慣カード -->
+        <div class="space-y-2">
+          <button
+            v-for="h in habitsByDate[d.iso] ?? []"
+            :key="h.id"
+            type="button"
+            class="w-full rounded-lg px-3 py-2 text-left text-sm font-medium shadow-sm transition active:scale-[0.97]"
+            :class="[
+              cardClass(h.id, d.iso),
+              isDisabled(h, d.iso) ? 'opacity-40 pointer-events-none' : ''
+            ]"
+            @click="onToggle(h, d.iso)"
+          >
+            <div class="flex items-center justify-between">
+              <span>{{ h.title }}</span>
+              <span v-if="weekly.getStatus(h.id, d.iso) === 'done'" class="ml-2 text-xs">✅</span>
+            </div>
+          </button>
 
-        <tbody class="divide-y divide-gray-100">
-          <tr v-for="h in state.habits" :key="h.id" class="align-middle">
-            <td class="p-0"><div class="px-4 py-4 text-sm font-medium text-gray-900">{{ h.title }}</div></td>
-            <td v-for="d in days" :key="d.iso" class="p-0">
-              <div class="h-12 w-full pl-4 pr-[14px] flex items-center justify-center"
-                   :class="isDisabled(h, d.iso) ? 'opacity-40 pointer-events-none' : ''"
-                   :title="isDisabled(h, d.iso) ? 'この日は対象外です' : ''">
-                <input
-                  type="checkbox"
-                  style="appearance:auto;-webkit-appearance:checkbox;-moz-appearance:checkbox"
-                  class="form-checkbox h-4 w-4 text-indigo-600 rounded focus:ring-0 focus:outline-none"
-                  :checked="isChecked(h.id, d.iso)"
-                  :disabled="isDisabled(h, d.iso)"
-                  @change="onToggle(h.id, d.iso, $event.target.checked)"
-                />
-              </div>
-            </td>
-          </tr>
-
-          <tr v-if="state.habits.length === 0">
-            <td colspan="8" class="px-5 py-10 text-center text-gray-500">📌 まだ習慣がありません。</td>
-          </tr>
-        </tbody>
-      </table>
+          <div
+            v-if="(habitsByDate[d.iso] ?? []).length === 0"
+            class="rounded-lg border border-dashed border-gray-200 px-3 py-6 text-center text-xs text-gray-400"
+          >
+            予定された習慣はありません
+          </div>
+        </div>
+      </div>
     </div>
 
+    <!-- スマホ: 横スクロール版 -->
+    <div class="md:hidden rounded-2xl bg-white shadow ring-1 ring-gray-200 overflow-x-auto">
+      <div class="flex min-w-max divide-x divide-gray-200">
+        <div
+          v-for="(d, idx) in days"
+          :key="d.iso"
+          class="min-w-[200px] p-4"
+        >
+          <div class="mb-4 text-center">
+            <div class="text-sm text-gray-500">{{ d.label }}</div>
+            <div class="text-xs text-gray-400">{{ DOW_JP[idx] }}</div>
+          </div>
+
+          <div class="space-y-2">
+            <button
+              v-for="h in habitsByDate[d.iso] ?? []"
+              :key="h.id"
+              type="button"
+              class="w-full rounded-lg px-3 py-2 text-left text-sm font-medium shadow-sm transition active:scale-[0.97]"
+              :class="[
+                cardClass(h.id, d.iso),
+                isDisabled(h, d.iso) ? 'opacity-40 pointer-events-none' : ''
+              ]"
+              @click="onToggle(h, d.iso)"
+            >
+              <div class="flex items-center justify-between">
+                <span>{{ h.title }}</span>
+                <span v-if="weekly.getStatus(h.id, d.iso) === 'done'" class="ml-2 text-xs">✅</span>
+              </div>
+            </button>
+
+            <div
+              v-if="(habitsByDate[d.iso] ?? []).length === 0"
+              class="rounded-lg border border-dashed border-gray-200 px-3 py-6 text-center text-xs text-gray-400"
+            >
+              予定された習慣はありません
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart -->
     <div class="mx-auto w-full">
-      <ChartWeekly :labels="days.map(d => d.mmdd)" :values="state.rates" />
+      <ChartWeekly
+        :labels="days.map(d => d.label)"
+        :values="weekly.state.rates ?? []"
+      />
     </div>
   </section>
 </template>
+
+<style scoped>
+button:active {
+  transform: scale(0.97);
+}
+</style>

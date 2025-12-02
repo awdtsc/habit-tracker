@@ -2,47 +2,42 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Relations\HasMany; // 追加
+use App\Models\PushSubscription;                    // 追加
 
 class User extends Authenticatable
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable;
+    // ❌ HasPushSubscriptions は外す
+    // use NotificationChannels\WebPush\HasPushSubscriptions;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
-    protected $fillable = [
-        'name',
-        'email',
-        'password',
+    protected $fillable = ['name','email','password'];
+
+    protected $hidden = ['password','remember_token'];
+
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+        // 'password' => 'hashed', // 二重ハッシュ回避で外しておく
     ];
 
     /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
+     * Push 購読（user_id 外部キー）
      */
-    protected $hidden = [
-        'password',
-        'remember_token',
-    ];
-
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
-    protected function casts(): array
+    public function pushSubscriptions(): HasMany
     {
-        return [
-            'email_verified_at' => 'datetime',
-            'password' => 'hashed',
-        ];
+        return $this->hasMany(PushSubscription::class, 'user_id');
+    }
+
+    /**
+     * Laravel Notifications の WebPush ルーティング（必要なら）
+     * ※ この戻り値はコレクションでOK
+     */
+    public function routeNotificationForWebPush()
+    {
+        return $this->pushSubscriptions;
     }
 }
