@@ -1,0 +1,146 @@
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Controllers/Api/HabitController.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Controllers/TodayController.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Controllers/HabitLogController.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Controllers/HabitInitController.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Controllers/DashboardController.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Controllers/RemindTaskController.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Controllers/RemindTaskActionController.php
+✔ Services（Daily Init / AutoLog / Scheduling / Reminder）
+ruby
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Services/AutoLogAndRemindService.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Services/DailyInitService.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Services/HabitScheduleService.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Services/SchedulingService.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Services/ReminderSendService.php
+✔ Models
+ruby
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Models/Habit.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Models/HabitLog.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Models/HabitTime.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Models/RemindTask.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Models/User.php
+✔ Policies / Observers
+ruby
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Policies/RemindTaskPolicy.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Observers/HabitObserver.php
+② Backend：API 認証レイヤー
+✔ Middleware / Kernel
+ruby
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Middleware/EnsureApiAuthenticated.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Middleware/Authenticate.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Middleware/RedirectIfAuthenticated.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Middleware/VerifyCsrfToken.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/app/Http/Kernel.php
+③ Backend：Routes
+bash
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/routes/api.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/routes/web.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/routes/auth.php
+④ Backend：Migrations（最小セット）
+✔ ベース
+ruby
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_08_05_023649_create_habits_table.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_08_05_051830_create_habit_logs_table.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_09_13_133059_create_habit_times_table.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_09_13_152612_create_remind_tasks_table.php
+✔ 差分 migration（習慣系 + remind_tasks 系のみ）
+ruby
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_08_06_022026_add_checked_at_to_habit_logs_table.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_08_07_045534_add_fields_to_habits_table.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_08_23_114846_adjust_habit_logs_for_timeslot.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_09_13_133441_add_habit_time_id_to_habit_logs_table.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_09_13_140207_add_remind_offset_to_habit_times_table.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_09_25_111217_add_time_slot_to_habit_times_table.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_10_01_115558_alter_remind_tasks_add_skipped_status.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_10_10_113826_add_indexes_to_remind_tasks_table.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_10_10_114228_alter_reschedule_to_json_on_remind_tasks.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/database/migrations/2025_10_10_133745_add_parent_task_id_to_remind_tasks_table.php
+⑤ Frontend：Stores（Pinia）
+bash
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/stores/auth.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/stores/habitBoard/api.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/stores/habitBoard/index.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/stores/habitBoard/selectors.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/stores/habitBoard/store.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/stores/uiState.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/stores/useWeeklyBoard.js
+⑥ Frontend：Composables
+bash
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/composables/useTodayState.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/composables/useTodayLists.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/composables/useWeeklyStats.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/composables/useReminder.ts
+⑦ Frontend：Components（Today / Weekly）
+Today 系全部
+ruby
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/today/HabitRow.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/today/TodayActionableSection.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/today/TodayAnytimeSection.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/today/TodayDoneSection.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/today/TodayHeader.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/today/TodayNextSlotSection.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/today/TodayProgress.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/today/TodaySlotSection.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/today/TodayTopPickCard.vue
+Weekly 系
+bash
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/HabitWeeklyBoard.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/WeeklyCell.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/WeeklyTagCell.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/ChartWeekly.vue
+その他
+bash
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/MiniBoard.vue
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/components/RemindActionModal.vue
+⑧ Frontend：domain / utils
+bash
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/domain/timeutil.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/domain/dates.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/domain/priority.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/domain/progress.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/domain/anytime.js
+
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/utils/habitBridge.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/utils/habitToggle.js
+⑨ Frontend：startup & router
+bash
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/startup/auth-guards.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/startup/backend.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/startup/remind.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/startup/push.js
+
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/router/index.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/router/routes.js
+
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/spa.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/push.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/axios.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/api.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/app.js
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/resources/js/App.vue
+⑩ Backend：config（あなたが修正したものだけ）
+bash
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/config/habits.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/config/remind.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/config/webpush.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/config/services.php
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/config/sanctum.php
+⑪ bootstrap（あなたが追加した ServiceProvider のみ）
+bash
+コードをコピーする
+https://raw.githubusercontent.com/awdtsc/habit-tracker/feat/habit-create-for-2/bootstra
